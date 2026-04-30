@@ -1,21 +1,31 @@
-# POC
+# Time Tracker
 
-This directory contains a minimal Playwright proof of concept for submitting one hardcoded entry to Quidlo Timesheets.
+This repository now has two entrypoints:
 
-## Current POC
+- `python -m poc` for the original single-entry Playwright proof of concept
+- `python -m cli` for MVP1, a Textual TUI that stages multiple entries before batch submission
 
-`main.py` attempts to:
+## CLI MVP1
 
-- open `https://timesheets.quidlo.com/tracker`
-- reuse a persistent Chromium profile in `src/.playwright-profile`
-- wait for manual login if needed
-- submit one entry for today with:
-  - duration `1h`
-  - description `test`
-  - project `Miquido - AI`
-  - tag `backend`
+The TUI supports:
+
+- adding multiple staged entries
+- selecting an entry to edit it in the form
+- deleting staged entries
+- batch submission through the existing Playwright flow
+
+The TUI also shows a mocked `.ics` import area with `start date` and `end date` fields. That workflow is intentionally not implemented yet.
+
+## Playwright Behavior
+
+The automation currently:
+
+- opens `https://timesheets.quidlo.com/tracker`
+- reuses a persistent Chromium profile in `src/.playwright-profile`
+- waits for manual login if needed
+- submits each staged entry in sequence
 
 ## Notes
 
-- The live page selectors have not been verified yet.
-- The script saves a screenshot to `src/.last-tracker-page.png` before submission to help inspect the form state.
+- The live page selectors have not been fully verified yet.
+- Batch submission stops on the first submission error.

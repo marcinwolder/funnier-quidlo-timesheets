@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "src"
 version = "0.1.0"
@@ -6,4 +10,12 @@ readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
     "playwright>=1.54.0",
+    "textual>=0.61.0",
 ]
+
+[project.scripts]
+cli = "cli.__main__:main"
+poc = "poc.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["cli", "poc"]
