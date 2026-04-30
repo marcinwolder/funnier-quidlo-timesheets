@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 
 from textual import on
 from textual.app import App, ComposeResult
@@ -8,8 +9,11 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Footer, Header, Input, Label, ListItem, ListView, Static
 
+from cli.ics_parser import parse_ics
 from poc.automation import SubmissionError, submit_entries
 from poc.models import EntryData
+
+CALENDARS_DIR = Path(__file__).resolve().parent.parent.parent / "calendars"
 
 
 class InfoScreen(ModalScreen[None]):
@@ -121,11 +125,11 @@ class TimeTrackerApp(App[None]):
                     yield Button("Update", id="update-entry")
                     yield Button("Reset", id="reset-form")
                 with Vertical(id="ics-box"):
-                    yield Static("Future .ics Import", classes="section-title")
-                    yield Input(placeholder="Calendar file (.ics) - not implemented", id="ics-file", disabled=True)
-                    yield Input(placeholder="Start date - future filter", id="ics-start", disabled=True)
-                    yield Input(placeholder="End date - future filter", id="ics-end", disabled=True)
-                    yield Button("Import .ics (Coming Soon)", id="ics-import", disabled=True)
+                    yield Static(".ics Import", classes="section-title")
+                    yield Input(placeholder="export.ics", id="ics-file")
+                    yield Input(placeholder="Start date YYYY-MM-DD (optional)", id="ics-start")
+                    yield Input(placeholder="End date YYYY-MM-DD (optional)", id="ics-end")
+                    yield Button("Import .ics", id="ics-import", variant="warning")
             with Vertical(id="list-column"):
                 yield Static("Staged Entries", classes="section-title")
                 yield ListView(id="entry-list")
@@ -133,7 +137,7 @@ class TimeTrackerApp(App[None]):
                     yield Button("Delete", id="delete-entry", variant="error")
                     yield Button("Submit All", id="submit-all", variant="success")
                 yield Static(
-                    "Batch submission stops on the first error. The .ics import flow is intentionally mocked only.",
+                    "Batch submission stops on the first error.",
                     id="list-help",
                 )
         yield Static("Ready.", id="status")
@@ -162,6 +166,32 @@ class TimeTrackerApp(App[None]):
     @on(Button.Pressed, "#reset-form")
     def handle_reset(self) -> None:
         self.action_reset_form()
+
+    @on(Button.Pressed, "#ics-import")
+    def handle_ics_import(self) -> None:
+        path = self.query_one("#ics-file", Input).value.strip()
+        start_str = self.query_one("#ics-start", Input).value.strip()
+        end_str = self.query_one("#ics-end", Input).value.strip()
+
+        if not path:
+            self.set_status("Enter the path to a .ics file.")
+            return
+
+        try:
+            start = date.fromisoformat(start_str) if start_str else None
+            end = date.fromisoformat(end_str) if end_str else None
+            entries = parse_ics(str(CALENDARS_DIR / path), start, end)
+        except Exception as exc:
+            self.push_screen(InfoScreen(f"Failed to import .ics:\n{exc}"))
+            return
+
+        if not entries:
+            self.set_status("No valid entries found in the .ics file for the given range.")
+            return
+
+        self.entries.extend(entries)
+        self.refresh_entry_list()
+        self.set_status(f"Imported {len(entries)} entries from .ics.")
 
     @on(ListView.Selected, "#entry-list")
     def handle_selection(self, event: ListView.Selected) -> None:
