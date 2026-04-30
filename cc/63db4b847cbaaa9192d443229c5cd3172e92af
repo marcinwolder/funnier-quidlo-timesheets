@@ -1,0 +1,16 @@
+src/poc/__main__.py
+  h_b46c43ab1e1bc2 1-148
+.gitignore
+  h_b46c43ab1e1bc2 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "cc63db4b847cbaaa9192d443229c5cd3172e92af",
+  "prompts": {},
+  "humans": {
+    "h_b46c43ab1e1bc2": {
+      "author": "marcinwolder"
+    }
+  }
+}
