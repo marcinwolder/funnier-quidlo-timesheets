@@ -120,33 +120,32 @@ async def open_calendar_picker(page: Page) -> None:
     calendar_button = page.locator("[class*=DatePicker_button]").first
     await calendar_button.wait_for(state="visible", timeout=3000)
     await calendar_button.click()
-    await page.locator("text=/^[A-Z][a-z]+\\s+\\d{4}$/").last.wait_for(
+    await page.locator("[class*=DatePickerContext_name]").first.wait_for(
         state="visible", timeout=3000
     )
 
 
 async def navigate_calendar_month(page: Page, target_date: date) -> None:
     target_month_label = target_date.strftime("%B %Y")
+    popup = page.locator("[class*=DatePickerContext_context]").first
     for _ in range(24):
-        month_label_locator = page.locator(f"text={target_month_label}").last
-        if (
-            await month_label_locator.count() > 0
-            and await month_label_locator.is_visible()
-        ):
+        month_label_locator = popup.locator("[class*=DatePickerContext_name]").first
+        current_label = (await month_label_locator.inner_text()).strip()
+        if current_label == target_month_label:
             return
 
-        current_month = await get_visible_calendar_month(page)
+        current_month = datetime.strptime(current_label, "%B %Y").date()
         if month_starts_before(current_month, target_date):
-            await page.locator("[class*=DatePicker_right]").last.click()
+            await popup.locator("a").last.click()
         else:
-            await page.locator("[class*=DatePicker_left]").last.click()
+            await popup.locator("a").first.click()
         await page.wait_for_timeout(300)
     raise RuntimeError(f"Could not navigate calendar popup to {target_month_label}.")
 
 
 async def get_visible_calendar_month(page: Page) -> date:
     month_text = (
-        await page.locator("text=/^[A-Z][a-z]+\\s+\\d{4}$/").last.inner_text()
+        await page.locator("[class*=DatePickerContext_name]").first.inner_text()
     ).strip()
     return datetime.strptime(month_text, "%B %Y").date()
 
@@ -159,18 +158,52 @@ def month_starts_before(current_month: date, target_date: date) -> bool:
 
 async def click_calendar_day(page: Page, target_date: date) -> None:
     day_text = str(target_date.day)
-    day_cell = (
-        page.locator("[class^='Calendar_day__']")
-        .filter(has_text=re.compile(rf"^{day_text}$"))
-        .first
+    day_cell = page.locator(
+        "[class*=DatePickerContext_view] [class*=MonthView_day]:not([class*=MonthView_transparent])"
+    ).filter(
+        has_text=re.compile(rf"^{day_text}$")
     )
-    if await day_cell.count() > 0 and await day_cell.is_visible():
-        await day_cell.click()
+    preferred_day = await find_preferred_calendar_day(day_cell)
+    if preferred_day is not None:
+        await preferred_day.click()
         return
 
-    fallback_day = page.get_by_text(day_text, exact=True).last
-    await fallback_day.wait_for(state="visible", timeout=3000)
-    await fallback_day.click()
+    raise RuntimeError(f"Could not find calendar day {day_text} in the visible month view.")
+
+
+async def find_preferred_calendar_day(day_cells: Locator) -> Locator | None:
+    visible_candidates: list[tuple[int, Locator]] = []
+    candidate_count = await day_cells.count()
+    for index in range(candidate_count):
+        candidate = day_cells.nth(index)
+        if not await candidate.is_visible():
+            continue
+
+        classes = (await candidate.get_attribute("class") or "").casefold()
+        aria_label = (await candidate.get_attribute("aria-label") or "").casefold()
+        data_testid = (await candidate.get_attribute("data-testid") or "").casefold()
+        combined_metadata = " ".join((classes, aria_label, data_testid))
+
+        score = 0
+        if any(
+            token in combined_metadata
+            for token in ("outside", "adjacent", "other-month", "prev-month", "next-month")
+        ):
+            score -= 10
+        if any(token in combined_metadata for token in ("disabled", "blocked", "inactive")):
+            score -= 5
+        if any(token in combined_metadata for token in ("current", "selected", "active")):
+            score += 2
+
+        visible_candidates.append((score, candidate))
+
+    if not visible_candidates:
+        return None
+
+    visible_candidates.sort(key=lambda item: item[0], reverse=True)
+    return visible_candidates[0][1]
+
+
 
 
 async def ensure_active_day(page: Page, day_label: str) -> None:
