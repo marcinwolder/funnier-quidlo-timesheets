@@ -1,0 +1,38 @@
+src/README.md
+  cfdf92be28efda0b 1,3,5-6,8,10-26,30-31
+src/poc/automation.py
+  h_b46c43ab1e1bc2 5,132,134,162,166
+  cfdf92be28efda0b 1-4,6-131,133,135-161,163-165,167-242
+src/poc/models.py
+  cfdf92be28efda0b 1-23
+src/pyproject.toml
+  cfdf92be28efda0b 1-4,13,15-21
+src/poc/__main__.py
+  cfdf92be28efda0b 3,6-7,19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "fe2bc6c4ba8a9fb8058581df805708e655682277",
+  "prompts": {
+    "cfdf92be28efda0b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ddee3-3668-7003-bc65-f9045dd5fdec",
+        "model": "gpt-5.4"
+      },
+      "human_author": "marcinwolder",
+      "messages": [],
+      "total_additions": 492,
+      "total_deletions": 341,
+      "accepted_lines": 300,
+      "overriden_lines": 4,
+      "messages_url": "https://gitai.miquido.dev/cas/dd9221e90ecfaab88957315772cd321c79c54edc2cba773da3cb1cfa04846e31"
+    }
+  },
+  "humans": {
+    "h_b46c43ab1e1bc2": {
+      "author": "marcinwolder"
+    }
+  }
+}
