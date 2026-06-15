@@ -1,0 +1,31 @@
+src/.gitignore
+  h_b46c43ab1e1bc2 14
+src/cli/__main__.py
+  h_b46c43ab1e1bc2 24-33,36-38,84,97,174,205-208,211,215-216,218-221,239,275,281-345,347-350,353-370,381,389,391-392,464,488-491,514-515,525,532,539-562,566-569,573-599,601-658,673
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "6066a5c8668d0826dabd55add31f586c63bf9d12",
+  "prompts": {
+    "bc9225266ac34677": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ecad1-b1b6-7232-9804-ac61a351e1a8",
+        "model": "gpt-5.4"
+      },
+      "human_author": "marcinwolder",
+      "messages": [],
+      "total_additions": 145,
+      "total_deletions": 0,
+      "accepted_lines": 0,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.miquido.dev/cas/28745ec4b0d167a535f17162d95dbecca21fcf41a660f1ff495dfd8eedd32cc9"
+    }
+  },
+  "humans": {
+    "h_b46c43ab1e1bc2": {
+      "author": "marcinwolder"
+    }
+  }
+}
