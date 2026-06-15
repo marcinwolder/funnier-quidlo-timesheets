@@ -1,0 +1,68 @@
+src/cli/__main__.py
+  23f89685b8dea300 11,13-17,19-20,75-82,110,175-184,195-197,199-200,202-213,215-242
+  d2ede3d3d94833f1 92-95,97,166-167,169-172,174,289-292,299-300
+  h_b46c43ab1e1bc2 12,21-22,116-119,201,214
+  2d539ee1a2970c60 3,5,18,25,47-56,125-134,149,162-164,168,173,186-189,192-194,198,245-246,249-253,274-277,304,309-311,318-323,339,341,347-357,367-369,372-376,379,385-387,391,437-471,473-475,477-488
+src/cli/ics_parser.py
+  2d539ee1a2970c60 5-6,8,13-19,26-27,29,39,42,46-47,54
+  h_b46c43ab1e1bc2 80,83
+src/Makefile
+  h_b46c43ab1e1bc2 1-3
+src/pyproject.toml
+  2d539ee1a2970c60 23
+  h_b46c43ab1e1bc2 22,24,27-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "2308fdd2f8d28bcce8df86a6205973a34ad78571",
+  "prompts": {
+    "23f89685b8dea300": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eca8b-044f-7993-b477-104381bc3a16",
+        "model": "gpt-5.4"
+      },
+      "human_author": "marcinwolder",
+      "messages": [],
+      "total_additions": 73,
+      "total_deletions": 45,
+      "accepted_lines": 73,
+      "overriden_lines": 4,
+      "messages_url": "https://gitai.miquido.dev/cas/87520db917b9e57357b6d9577e18df92087f32ef464561baaee68dec8f98be43"
+    },
+    "2d539ee1a2970c60": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eca98-5017-7233-a41f-5097512647b3",
+        "model": "gpt-5.4"
+      },
+      "human_author": "marcinwolder",
+      "messages": [],
+      "total_additions": 844,
+      "total_deletions": 150,
+      "accepted_lines": 153,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.miquido.dev/cas/d604f0a66b6c54b491a6f923587aca24a3b5d665966de94ad48cb890462a458f"
+    },
+    "d2ede3d3d94833f1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eca86-e7b2-7991-9651-a8b7421bf00a",
+        "model": "gpt-5.4"
+      },
+      "human_author": "marcinwolder",
+      "messages": [],
+      "total_additions": 46,
+      "total_deletions": 11,
+      "accepted_lines": 18,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.miquido.dev/cas/92b8d0a48ea155325c44682e8349ff598b74f778ac3fb7ee8a1e78c3449dede0"
+    }
+  },
+  "humans": {
+    "h_b46c43ab1e1bc2": {
+      "author": "marcinwolder"
+    }
+  }
+}
