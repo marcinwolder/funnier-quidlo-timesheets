@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import re
-from datetime import date, datetime
+import sys
+from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import TYPE_CHECKING
 
+from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Locator, Page, async_playwright
 
-from poc.models import EntryData
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
+
+    from poc.models import EntryData
 
 TRACKER_URL = "https://timesheets.quidlo.com/tracker"
 PROFILE_DIR = Path(__file__).resolve().parent.parent / ".playwright-profile"
@@ -22,35 +27,48 @@ class SubmissionError(RuntimeError):
         self.__cause__ = cause
 
 
+class AutomationError(RuntimeError):
+    """Raised when browser automation fails outside a single entry submission."""
+
+
 async def submit_entries(entries: Sequence[EntryData]) -> None:
     sorted_entries = sort_entries_for_submission(entries)
 
-    async with async_playwright() as playwright:
-        context = await playwright.chromium.launch_persistent_context(
-            user_data_dir=str(PROFILE_DIR),
-            headless=False,
-            viewport={"width": 1400, "height": 1000},
-        )
-        page = context.pages[0] if context.pages else await context.new_page()
+    try:
+        async with async_playwright() as playwright:
+            context = await playwright.chromium.launch_persistent_context(
+                user_data_dir=str(PROFILE_DIR),
+                headless=False,
+                viewport={"width": 1400, "height": 1000},
+            )
+            page = context.pages[0] if context.pages else await context.new_page()
 
-        try:
-            await load_tracker(page)
-
-            if await requires_login(page):
-                print(
-                    "Login required in the opened browser window. Complete login, then press Enter here."
-                )
-                input()
+            try:
                 await load_tracker(page)
 
-            for index, entry in enumerate(sorted_entries, start=1):
-                try:
-                    await submit_entry(page, entry)
-                except Exception as exc:
-                    raise SubmissionError(index, entry, exc) from exc
-                print(f"Submitted entry {index}/{len(sorted_entries)}: {entry.summary}")
-        finally:
-            await context.close()
+                if await requires_login(page):
+                    message = (
+                        "Login required in the opened browser window. "
+                        "Complete login, then press Enter here."
+                    )
+                    sys.stdout.write(f"{message}\n")
+                    await asyncio.to_thread(input)
+                    await load_tracker(page)
+
+                for index, entry in enumerate(sorted_entries, start=1):
+                    try:
+                        await submit_entry(page, entry)
+                    except (OSError, PlaywrightError, RuntimeError) as exc:
+                        raise SubmissionError(index, entry, exc) from exc
+                    progress = (
+                        f"Submitted entry {index}/{len(sorted_entries)}: "
+                        f"{entry.summary}"
+                    )
+                    sys.stdout.write(f"{progress}\n")
+            finally:
+                await context.close()
+    except (OSError, PlaywrightError, RuntimeError) as exc:
+        raise AutomationError(str(exc)) from exc
 
 
 def submit_entries_sync(entries: Sequence[EntryData]) -> None:
@@ -95,7 +113,7 @@ async def requires_login(page: Page) -> bool:
 
 async def select_entry_date(page: Page, date_iso: str) -> None:
     target_date = date.fromisoformat(date_iso)
-    if target_date == date.today():
+    if target_date == datetime.now().astimezone().date():
         await select_today(page)
         return
 
@@ -121,7 +139,8 @@ async def open_calendar_picker(page: Page) -> None:
     await calendar_button.wait_for(state="visible", timeout=3000)
     await calendar_button.click()
     await page.locator("[class*=DatePickerContext_name]").first.wait_for(
-        state="visible", timeout=3000
+        state="visible",
+        timeout=3000,
     )
 
 
@@ -134,20 +153,26 @@ async def navigate_calendar_month(page: Page, target_date: date) -> None:
         if current_label == target_month_label:
             return
 
-        current_month = datetime.strptime(current_label, "%B %Y").date()
+        current_month = parse_month_label(current_label)
         if month_starts_before(current_month, target_date):
             await popup.locator("a").last.click()
         else:
             await popup.locator("a").first.click()
         await page.wait_for_timeout(300)
-    raise RuntimeError(f"Could not navigate calendar popup to {target_month_label}.")
+    message = f"Could not navigate calendar popup to {target_month_label}."
+    raise RuntimeError(message)
 
 
 async def get_visible_calendar_month(page: Page) -> date:
     month_text = (
         await page.locator("[class*=DatePickerContext_name]").first.inner_text()
     ).strip()
-    return datetime.strptime(month_text, "%B %Y").date()
+    return parse_month_label(month_text)
+
+
+def parse_month_label(month_label: str) -> date:
+    parsed = datetime.strptime(month_label, "%B %Y").replace(tzinfo=timezone.utc)
+    return parsed.date()
 
 
 def month_starts_before(current_month: date, target_date: date) -> bool:
@@ -159,16 +184,20 @@ def month_starts_before(current_month: date, target_date: date) -> bool:
 async def click_calendar_day(page: Page, target_date: date) -> None:
     day_text = str(target_date.day)
     day_cell = page.locator(
-        "[class*=DatePickerContext_view] [class*=MonthView_day]:not([class*=MonthView_transparent])"
+        (
+            "[class*=DatePickerContext_view] "
+            "[class*=MonthView_day]:not([class*=MonthView_transparent])"
+        ),
     ).filter(
-        has_text=re.compile(rf"^{day_text}$")
+        has_text=re.compile(rf"^{day_text}$"),
     )
     preferred_day = await find_preferred_calendar_day(day_cell)
     if preferred_day is not None:
         await preferred_day.click()
         return
 
-    raise RuntimeError(f"Could not find calendar day {day_text} in the visible month view.")
+    message = f"Could not find calendar day {day_text} in the visible month view."
+    raise RuntimeError(message)
 
 
 async def find_preferred_calendar_day(day_cells: Locator) -> Locator | None:
@@ -182,17 +211,29 @@ async def find_preferred_calendar_day(day_cells: Locator) -> Locator | None:
         classes = (await candidate.get_attribute("class") or "").casefold()
         aria_label = (await candidate.get_attribute("aria-label") or "").casefold()
         data_testid = (await candidate.get_attribute("data-testid") or "").casefold()
-        combined_metadata = " ".join((classes, aria_label, data_testid))
+        combined_metadata = f"{classes} {aria_label} {data_testid}"
 
         score = 0
         if any(
             token in combined_metadata
-            for token in ("outside", "adjacent", "other-month", "prev-month", "next-month")
+            for token in (
+                "outside",
+                "adjacent",
+                "other-month",
+                "prev-month",
+                "next-month",
+            )
         ):
             score -= 10
-        if any(token in combined_metadata for token in ("disabled", "blocked", "inactive")):
+        if any(
+            token in combined_metadata
+            for token in ("disabled", "blocked", "inactive")
+        ):
             score -= 5
-        if any(token in combined_metadata for token in ("current", "selected", "active")):
+        if any(
+            token in combined_metadata
+            for token in ("current", "selected", "active")
+        ):
             score += 2
 
         visible_candidates.append((score, candidate))
@@ -203,17 +244,16 @@ async def find_preferred_calendar_day(day_cells: Locator) -> Locator | None:
     visible_candidates.sort(key=lambda item: item[0], reverse=True)
     return visible_candidates[0][1]
 
-
-
-
 async def ensure_active_day(page: Page, day_label: str) -> None:
     active_day = page.locator("[class*='TimeBar_active'] [class*='TimeBar_name']").first
     await active_day.wait_for(state="visible", timeout=3000)
     active_text = (await active_day.inner_text()).strip()
     if active_text != day_label:
-        raise RuntimeError(
-            f"Tracker active day stayed on {active_text!r} instead of {day_label!r}."
+        message = (
+            f"Tracker active day stayed on {active_text!r} "
+            f"instead of {day_label!r}."
         )
+        raise RuntimeError(message)
 
 
 async def fill_task_description(page: Page, description: str) -> None:
@@ -261,7 +301,7 @@ async def fill_text_input(locator: Locator, value: str) -> None:
 async def click_autocomplete_option(page: Page, text: str) -> None:
     pattern = re.compile(rf"^{re.escape(text)}$")
     options = page.locator(
-        "[class*='Autocomplete_optionsContainer'] [class*='Autocomplete_dropdown']"
+        "[class*='Autocomplete_optionsContainer'] [class*='Autocomplete_dropdown']",
     )
     option = options.filter(has_text=pattern).first
     await option.wait_for(state="visible", timeout=5000)

@@ -2,14 +2,20 @@ from __future__ import annotations
 
 import re
 from datetime import date, datetime, timedelta
-from typing import Optional
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
-import recurring_ical_events
+import recurring_ical_events  # pyright: ignore[reportMissingTypeStubs]
 from icalendar import Calendar
 
-_ONE_DAY = timedelta(days=1)
-
 from poc.models import EntryData
+
+if TYPE_CHECKING:
+    from icalendar.cal import Component
+else:
+    Component = Any
+
+_ONE_DAY = timedelta(days=1)
 
 _TITLE_RE = re.compile(r"^\[(.+?)\]\s*(.+)$")
 _TAG_RE = re.compile(r"#([\w][\w-]*)")
@@ -17,10 +23,10 @@ _TAG_RE = re.compile(r"#([\w][\w-]*)")
 
 def parse_ics(
     path: str,
-    start: Optional[date] = None,
-    end: Optional[date] = None,
+    start: date | None = None,
+    end: date | None = None,
 ) -> list[EntryData]:
-    with open(path, "rb") as f:
+    with Path(path).open("rb") as f:
         cal = Calendar.from_ical(f.read())
 
     if start and end:
@@ -30,21 +36,22 @@ def parse_ics(
     elif end:
         events = recurring_ical_events.of(cal).between(date(1970, 1, 1), end + _ONE_DAY)
     else:
+        untyped_calendar: Any = cal
         events = [
             component
-            for component in cal.walk("VEVENT")
+            for component in cast("list[Component]", untyped_calendar.walk("VEVENT"))
             if not component.get("RRULE")
         ]
 
-    entries = []
-    for event in events:
+    entries: list[EntryData] = []
+    for event in cast("list[Component]", events):
         entry = _event_to_entry(event)
         if entry is not None:
             entries.append(entry)
     return entries
 
 
-def _event_to_entry(event) -> Optional[EntryData]:
+def _event_to_entry(event: Component) -> EntryData | None:
     dtstart = event.get("DTSTART")
     dtend = event.get("DTEND")
     if dtstart is None or dtend is None:
@@ -70,7 +77,11 @@ def _event_to_entry(event) -> Optional[EntryData]:
     tags = tuple(_TAG_RE.findall(body))
 
     duration = _format_duration(end_dt - start_dt)
-    date_iso = start_dt.date().isoformat() if isinstance(start_dt, datetime) else start_dt.isoformat()
+    date_iso = (
+        start_dt.date().isoformat()
+        if isinstance(start_dt, datetime)
+        else start_dt.isoformat()
+    )
 
     return EntryData(
         date_iso=date_iso,

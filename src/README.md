@@ -13,8 +13,9 @@ The TUI supports:
 - selecting an entry to edit it in the form
 - deleting staged entries
 - batch submission through the existing Playwright flow
+- importing entries from `.ics` files stored in `calendars/`
 
-The TUI also shows a mocked `.ics` import area with `start date` and `end date` fields. That workflow is intentionally not implemented yet.
+The `.ics` import field supports autocompleting known `.ics` filenames from `calendars/`, plus optional `start date` and `end date` filters.
 
 ## Playwright Behavior
 

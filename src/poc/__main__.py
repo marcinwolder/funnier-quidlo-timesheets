@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+from datetime import datetime
 
 from poc.automation import submit_entries
 from poc.models import EntryData
 
+
+def local_today_iso() -> str:
+    return datetime.now().astimezone().date().isoformat()
+
+
 ENTRY = EntryData(
-    date_iso=date.today().isoformat(),
+    date_iso=local_today_iso(),
     duration="1h",
     description="test",
     project="Miquido - AI",
