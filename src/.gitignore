@@ -11,3 +11,4 @@ wheels/
 
 # Local Playwright/browser state
 .playwright-profile/
+.remote_calendars.json

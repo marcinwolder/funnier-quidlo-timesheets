@@ -27,7 +27,15 @@ def parse_ics(
     end: date | None = None,
 ) -> list[EntryData]:
     with Path(path).open("rb") as f:
-        cal = Calendar.from_ical(f.read())
+        return parse_ics_bytes(f.read(), start, end)
+
+
+def parse_ics_bytes(
+    raw_ics: bytes,
+    start: date | None = None,
+    end: date | None = None,
+) -> list[EntryData]:
+    cal = Calendar.from_ical(raw_ics)
 
     if start and end:
         events = recurring_ical_events.of(cal).between(start, end + _ONE_DAY)

@@ -21,8 +21,21 @@ from textual.widgets import (
     TabPane,
 )
 
-from cli.ics_parser import parse_ics
-from poc.automation import AutomationError, SubmissionError, submit_entries
+from cli.ics_parser import parse_ics, parse_ics_bytes
+from cli.remote_calendars import (
+    RemoteCalendar,
+    fetch_remote_calendar,
+    get_remote_calendar,
+    load_remote_calendars,
+    remote_calendar_names,
+    save_remote_calendar,
+)
+from poc.automation import (
+    AutomationError,
+    SubmissionError,
+    sort_entries_for_submission,
+    submit_entries,
+)
 from poc.models import EntryData
 
 CALENDARS_DIR = Path(__file__).resolve().parent.parent.parent / "calendars"
@@ -64,11 +77,11 @@ class TimeTrackerApp(App[None]):
     }
 
     #form-column, #list-column {
-        width: 1fr;
         padding: 1 2;
     }
 
     #form-column {
+        width: 60;
         border: round $accent;
     }
 
@@ -81,6 +94,7 @@ class TimeTrackerApp(App[None]):
     }
 
     #list-column {
+        width: 1fr;
         border: round $success;
     }
 
@@ -157,6 +171,7 @@ class TimeTrackerApp(App[None]):
     def __init__(self) -> None:
         super().__init__()
         self.entries: list[EntryData] = []
+        self.remote_calendars: list[RemoteCalendar] = []
         self.selected_index: int | None = None
 
     @staticmethod
@@ -187,59 +202,24 @@ class TimeTrackerApp(App[None]):
             self.available_ics_files(),
             case_sensitive=False,
         )
+        remote_calendar_suggester = SuggestFromList(
+            self.available_remote_calendar_names(),
+            case_sensitive=False,
+        )
         yield Header(show_clock=True)
         with Horizontal(id="body"):
-            with Vertical(id="form-column"), TabbedContent(
-                initial="manual", id="form-tabs",
+            with (
+                Vertical(id="form-column"),
+                TabbedContent(
+                    initial="manual",
+                    id="form-tabs",
+                ),
             ):
-                    with TabPane("Manual", id="manual"):
-                        yield Label("Date", classes="field-label")
-                        yield Input(
-                            value=self.local_today().isoformat(),
-                            placeholder="YYYY-MM-DD",
-                            id="date",
-                            classes="field",
-                        )
-                        yield Label("Duration", classes="field-label")
-                        yield Input(value="1h", id="duration", classes="field")
-                        yield Label("Description", classes="field-label")
-                        yield Input(id="description", classes="field")
-                        yield Label("Project", classes="field-label")
-                        yield Input(value="Miquido - AI", id="project", classes="field")
-                        yield Label("Tags", classes="field-label")
-                        yield Input(
-                            value="backend",
-                            placeholder="tag1, tag2",
-                            id="tags",
-                            classes="field",
-                        )
-                        with Horizontal(classes="action-row"):
-                            yield Button("Add", id="add-entry", variant="primary")
-                            yield Button("Update", id="update-entry")
-                            yield Button("Reset", id="reset-form")
-                    with TabPane("From .ics", id="from-ics"):
-                        yield Label("ICS file", classes="field-label")
-                        yield Input(
-                            placeholder="export.ics",
-                            id="ics-file",
-                            classes="field",
-                            suggester=ics_suggester,
-                        )
-                        yield Label("Start date", classes="field-label")
-                        yield Input(
-                            value=self.default_ics_start_date(),
-                            placeholder="YYYY-MM-DD",
-                            id="ics-start",
-                            classes="field",
-                        )
-                        yield Label("End date", classes="field-label")
-                        yield Input(
-                            value=self.default_ics_end_date(),
-                            placeholder="YYYY-MM-DD",
-                            id="ics-end",
-                            classes="field",
-                        )
-                        yield Button("Import .ics", id="ics-import", variant="warning")
+                yield from self.compose_manual_tab()
+                yield from self.compose_ics_tab(ics_suggester)
+                yield from self.compose_remote_calendar_tab(
+                    remote_calendar_suggester,
+                )
             with Vertical(id="list-column"):
                 yield Static("Staged Entries", classes="section-title")
                 yield Static(self.entry_list_header(), id="entry-list-header")
@@ -256,6 +236,7 @@ class TimeTrackerApp(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
+        self.refresh_remote_calendars()
         self.query_one("#description", Input).focus()
         self.refresh_entry_list()
 
@@ -286,43 +267,118 @@ class TimeTrackerApp(App[None]):
     @on(Button.Pressed, "#ics-import")
     def handle_ics_import(self) -> None:
         path = self.query_one("#ics-file", Input).value.strip()
-        start_input = self.query_one("#ics-start", Input)
-        end_input = self.query_one("#ics-end", Input)
-        start_str = start_input.value.strip() or self.default_ics_start_date()
-        end_str = end_input.value.strip() or self.default_ics_end_date()
-
         if not path:
             self.set_status("Enter the path to a .ics file.")
             return
 
         try:
-            start_input.value = start_str
-            end_input.value = end_str
-            start = date.fromisoformat(start_str) if start_str else None
-            end = date.fromisoformat(end_str) if end_str else None
+            start, end = self.read_date_range("#ics-start", "#ics-end")
             entries = parse_ics(str(CALENDARS_DIR / path), start, end)
         except (OSError, ValueError) as exc:
             self.push_screen(InfoScreen(f"Failed to import .ics:\n{exc}"))
             return
 
-        if not entries:
-            self.set_status(
-                "No valid entries found in the .ics file for the given range.",
-            )
+        self.stage_imported_entries(
+            entries,
+            empty_message=(
+                "No valid entries found in the .ics file for the given range."
+            ),
+            success_message=f"Imported {{count}} entries from .ics: {path}.",
+        )
+
+    @on(Button.Pressed, "#remote-calendar-load")
+    def handle_remote_calendar_load(self) -> None:
+        name = self.query_one("#remote-calendar-name", Input).value.strip()
+        if not name:
+            calendar = self.highlighted_remote_calendar()
+            if calendar is None:
+                self.set_status("Enter or highlight a saved calendar to load.")
+                return
+            name = calendar.name
+
+        calendar = get_remote_calendar(name)
+        if calendar is None:
+            self.set_status(f"No saved calendar named '{name}'.")
             return
 
-        self.entries.extend(entries)
-        self.refresh_entry_list()
-        self.set_status(f"Imported {len(entries)} entries from .ics.")
+        self.load_remote_calendar_into_form(calendar)
+        self.set_status(f"Loaded saved calendar '{calendar.name}'.")
+
+    @on(Button.Pressed, "#remote-calendar-save")
+    def handle_remote_calendar_save(self) -> None:
+        name = self.query_one("#remote-calendar-name", Input).value.strip()
+        url = self.query_one("#remote-calendar-url", Input).value.strip()
+        if not name or not url:
+            self.set_status("Calendar name and URL are required.")
+            return
+
+        try:
+            save_remote_calendar(RemoteCalendar(name=name, url=url))
+        except (OSError, ValueError, TypeError) as exc:
+            self.push_screen(InfoScreen(f"Failed to save remote calendar:\n{exc}"))
+            return
+
+        self.refresh_remote_calendars()
+        self.set_status(f"Saved remote calendar '{name}'.")
+
+    @on(Button.Pressed, "#remote-calendar-import")
+    def handle_remote_calendar_import(self) -> None:
+        name_input = self.query_one("#remote-calendar-name", Input)
+        url_input = self.query_one("#remote-calendar-url", Input)
+        name = name_input.value.strip()
+        url = url_input.value.strip()
+
+        if name and not url:
+            calendar = get_remote_calendar(name)
+            if calendar is not None:
+                self.load_remote_calendar_into_form(calendar)
+                url = calendar.url
+
+        if not url:
+            self.set_status("Enter a calendar URL or load a saved calendar first.")
+            return
+
+        source_label = name or url
+        try:
+            start, end = self.read_date_range(
+                "#remote-calendar-start",
+                "#remote-calendar-end",
+            )
+            raw_ics = fetch_remote_calendar(url)
+            entries = parse_ics_bytes(raw_ics, start, end)
+        except (OSError, ValueError) as exc:
+            self.push_screen(InfoScreen(f"Failed to import remote calendar:\n{exc}"))
+            return
+
+        self.stage_imported_entries(
+            entries,
+            empty_message=(
+                "No valid entries found in the remote calendar for the given range."
+            ),
+            success_message=(
+                f"Imported {{count}} entries from remote calendar: {source_label}."
+            ),
+        )
+
+    @on(OptionList.OptionHighlighted, "#remote-calendar-list")
+    def handle_remote_calendar_highlighted(
+        self,
+        event: OptionList.OptionHighlighted,
+    ) -> None:
+        if event.option_index >= len(self.remote_calendars):
+            return
+        self.load_remote_calendar_into_form(self.remote_calendars[event.option_index])
 
     @on(OptionList.OptionHighlighted, "#entry-list")
     def handle_selection_highlighted(
-        self, event: OptionList.OptionHighlighted,
+        self,
+        event: OptionList.OptionHighlighted,
     ) -> None:
         self.selected_index = event.option_index
         if self.selected_index >= len(self.entries):
             return
         self.load_entry_into_form(self.entries[self.selected_index])
+        self.query_one("#form-tabs", TabbedContent).active = "manual"
         self.set_status(f"Loaded entry {self.selected_index + 1} into the form.")
 
     def action_add_entry(self) -> None:
@@ -330,9 +386,10 @@ class TimeTrackerApp(App[None]):
         if entry is None:
             return
         self.entries.append(entry)
-        self.selected_index = len(self.entries) - 1
+        self.resort_entries(selected_entry=entry)
         self.refresh_entry_list()
-        self.set_status(f"Added entry {len(self.entries)}.")
+        added_index = self.entries.index(entry) + 1
+        self.set_status(f"Added entry {added_index}.")
 
     def action_delete_selected(self) -> None:
         if self.selected_index is None or self.selected_index >= len(self.entries):
@@ -404,6 +461,7 @@ class TimeTrackerApp(App[None]):
         if entry is None:
             return
         self.entries[self.selected_index] = entry
+        self.resort_entries(selected_entry=entry)
         self.refresh_entry_list()
         self.set_status(f"Updated entry {self.selected_index + 1}.")
 
@@ -427,6 +485,178 @@ class TimeTrackerApp(App[None]):
             tags=tags,
         )
 
+    def compose_manual_tab(self) -> ComposeResult:
+        with TabPane("Manual", id="manual"):
+            yield Label("Date", classes="field-label")
+            yield Input(
+                value=self.local_today().isoformat(),
+                placeholder="YYYY-MM-DD",
+                id="date",
+                classes="field",
+            )
+            yield Label("Duration", classes="field-label")
+            yield Input(value="1h", id="duration", classes="field")
+            yield Label("Description", classes="field-label")
+            yield Input(id="description", classes="field")
+            yield Label("Project", classes="field-label")
+            yield Input(value="Miquido - AI", id="project", classes="field")
+            yield Label("Tags", classes="field-label")
+            yield Input(
+                value="backend",
+                placeholder="tag1, tag2",
+                id="tags",
+                classes="field",
+            )
+            with Horizontal(classes="action-row"):
+                yield Button("Add", id="add-entry", variant="primary")
+                yield Button("Update", id="update-entry")
+                yield Button("Reset", id="reset-form")
+
+    def compose_ics_tab(self, ics_suggester: SuggestFromList) -> ComposeResult:
+        with TabPane("From .ics", id="from-ics"):
+            yield Label("ICS file", classes="field-label")
+            yield Input(
+                placeholder="export.ics",
+                id="ics-file",
+                classes="field",
+                suggester=ics_suggester,
+            )
+            yield Label("Start date", classes="field-label")
+            yield Input(
+                value=self.default_ics_start_date(),
+                placeholder="YYYY-MM-DD",
+                id="ics-start",
+                classes="field",
+            )
+            yield Label("End date", classes="field-label")
+            yield Input(
+                value=self.default_ics_end_date(),
+                placeholder="YYYY-MM-DD",
+                id="ics-end",
+                classes="field",
+            )
+            yield Button("Import .ics", id="ics-import", variant="warning")
+
+    def compose_remote_calendar_tab(
+        self,
+        remote_calendar_suggester: SuggestFromList,
+    ) -> ComposeResult:
+        with TabPane("Remote calendar", id="remote-calendar"):
+            yield Label("Calendar name", classes="field-label")
+            yield Input(
+                placeholder="Team calendar",
+                id="remote-calendar-name",
+                classes="field",
+                suggester=remote_calendar_suggester,
+            )
+            yield Label("Calendar URL", classes="field-label")
+            yield Input(
+                placeholder="https://example.com/calendar.ics",
+                id="remote-calendar-url",
+                classes="field",
+            )
+            yield Label("Start date", classes="field-label")
+            yield Input(
+                value=self.default_ics_start_date(),
+                placeholder="YYYY-MM-DD",
+                id="remote-calendar-start",
+                classes="field",
+            )
+            yield Label("End date", classes="field-label")
+            yield Input(
+                value=self.default_ics_end_date(),
+                placeholder="YYYY-MM-DD",
+                id="remote-calendar-end",
+                classes="field",
+            )
+            with Horizontal(classes="action-row"):
+                yield Button("Load saved", id="remote-calendar-load")
+                yield Button(
+                    "Save calendar",
+                    id="remote-calendar-save",
+                    variant="primary",
+                )
+                yield Button(
+                    "Import remote .ics",
+                    id="remote-calendar-import",
+                    variant="warning",
+                )
+            yield Static("Saved calendars", classes="section-title")
+            yield OptionList(id="remote-calendar-list")
+
+    @staticmethod
+    def available_remote_calendar_names() -> list[str]:
+        return remote_calendar_names()
+
+    def refresh_remote_calendars(self) -> None:
+        self.remote_calendars = sorted(
+            load_remote_calendars(),
+            key=lambda calendar: calendar.name.casefold(),
+        )
+        remote_name_input = self.query_one("#remote-calendar-name", Input)
+        remote_name_input.suggester = SuggestFromList(
+            [calendar.name for calendar in self.remote_calendars],
+            case_sensitive=False,
+        )
+        remote_calendar_list = self.query_one("#remote-calendar-list", OptionList)
+        highlighted_index = remote_calendar_list.highlighted
+        remote_calendar_list.clear_options()
+        for calendar in self.remote_calendars:
+            remote_calendar_list.add_option(calendar.name)
+        if self.remote_calendars:
+            remote_calendar_list.highlighted = min(
+                0 if highlighted_index is None else highlighted_index,
+                len(self.remote_calendars) - 1,
+            )
+
+    def load_remote_calendar_into_form(self, calendar: RemoteCalendar) -> None:
+        self.query_one("#remote-calendar-name", Input).value = calendar.name
+        self.query_one("#remote-calendar-url", Input).value = calendar.url
+
+    def highlighted_remote_calendar(self) -> RemoteCalendar | None:
+        remote_calendar_list = self.query_one("#remote-calendar-list", OptionList)
+        highlighted = remote_calendar_list.highlighted
+        if highlighted is None or highlighted >= len(self.remote_calendars):
+            return None
+        return self.remote_calendars[highlighted]
+
+    def read_date_range(
+        self,
+        start_input_id: str,
+        end_input_id: str,
+    ) -> tuple[date | None, date | None]:
+        start_input = self.query_one(start_input_id, Input)
+        end_input = self.query_one(end_input_id, Input)
+        start_str = start_input.value.strip() or self.default_ics_start_date()
+        end_str = end_input.value.strip() or self.default_ics_end_date()
+        start_input.value = start_str
+        end_input.value = end_str
+        start = date.fromisoformat(start_str) if start_str else None
+        end = date.fromisoformat(end_str) if end_str else None
+        return start, end
+
+    def stage_imported_entries(
+        self,
+        entries: list[EntryData],
+        *,
+        empty_message: str,
+        success_message: str,
+    ) -> None:
+        if not entries:
+            self.set_status(empty_message)
+            return
+
+        self.entries.extend(entries)
+        self.resort_entries()
+        self.refresh_entry_list()
+        self.set_status(success_message.format(count=len(entries)))
+
+    def resort_entries(self, selected_entry: EntryData | None = None) -> None:
+        self.entries = sort_entries_for_submission(self.entries)
+        if selected_entry is None:
+            return
+        self.selected_index = self.entries.index(selected_entry)
+
     def load_entry_into_form(self, entry: EntryData) -> None:
         self.query_one("#date", Input).value = entry.date_iso
         self.query_one("#duration", Input).value = entry.duration
@@ -440,7 +670,7 @@ class TimeTrackerApp(App[None]):
             return value
         if width <= cls.ELLIPSIS_WIDTH:
             return value[:width]
-        return f"{value[:width - cls.ELLIPSIS_WIDTH]}..."
+        return f"{value[: width - cls.ELLIPSIS_WIDTH]}..."
 
     @classmethod
     def format_cell(cls, value: str, width: int) -> str:

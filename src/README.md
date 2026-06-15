@@ -14,8 +14,16 @@ The TUI supports:
 - deleting staged entries
 - batch submission through the existing Playwright flow
 - importing entries from `.ics` files stored in `calendars/`
+- saving multiple remote `.ics` calendar subscriptions and importing from them by date range
 
 The `.ics` import field supports autocompleting known `.ics` filenames from `calendars/`, plus optional `start date` and `end date` filters.
+
+The `Remote calendar` tab supports:
+
+- saving named remote calendar subscriptions as `name + url`
+- reloading saved calendars by name
+- importing events from a selected remote `.ics` source with the same default date range as file import
+- adding all imported entries to staging, including repeated imports of the same calendar
 
 ## Playwright Behavior
 
