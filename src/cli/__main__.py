@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from pathlib import Path
 from typing import ClassVar
@@ -39,6 +40,7 @@ from poc.automation import (
 from poc.models import EntryData
 
 CALENDARS_DIR = Path(__file__).resolve().parent.parent.parent / "calendars"
+_DURATION_PART_RE = re.compile(r"(?P<value>\d+)\s*(?P<unit>[hm])", re.IGNORECASE)
 
 
 class InfoScreen(ModalScreen[None]):
@@ -146,6 +148,12 @@ class TimeTrackerApp(App[None]):
         margin-bottom: 1;
     }
 
+    #entry-summary {
+        margin-bottom: 1;
+        padding: 0 1;
+        border: round $panel;
+    }
+
     #status {
         height: 3;
         padding: 0 2;
@@ -223,6 +231,7 @@ class TimeTrackerApp(App[None]):
             with Vertical(id="list-column"):
                 yield Static("Staged Entries", classes="section-title")
                 yield Static(self.entry_list_header(), id="entry-list-header")
+                yield Static(self.entry_summary_text(), id="entry-summary")
                 yield OptionList(id="entry-list")
                 with Horizontal(classes="action-row"):
                     yield Button("Delete", id="delete-entry", variant="error")
@@ -699,8 +708,39 @@ class TimeTrackerApp(App[None]):
         ]
         return "  ".join(cells)
 
+    @staticmethod
+    def parse_duration_minutes(duration: str) -> int:
+        total_minutes = 0
+        matched = False
+        for match in _DURATION_PART_RE.finditer(duration):
+            matched = True
+            value = int(match.group("value"))
+            unit = match.group("unit").lower()
+            total_minutes += value * 60 if unit == "h" else value
+        if not matched:
+            raise ValueError(f"Unsupported duration format: {duration}")
+        return total_minutes
+
+    @staticmethod
+    def format_total_duration(total_minutes: int) -> str:
+        hours, minutes = divmod(total_minutes, 60)
+        if hours and minutes:
+            return f"{hours}h {minutes}m"
+        if hours:
+            return f"{hours}h"
+        return f"{minutes}m"
+
+    def entry_summary_text(self) -> str:
+        total_minutes = sum(
+            self.parse_duration_minutes(entry.duration) for entry in self.entries
+        )
+        total_duration = self.format_total_duration(total_minutes)
+        entry_label = "record" if len(self.entries) == 1 else "records"
+        return f"Total: {total_duration} across {len(self.entries)} {entry_label}"
+
     def refresh_entry_list(self) -> None:
         entry_list = self.query_one("#entry-list", OptionList)
+        self.query_one("#entry-summary", Static).update(self.entry_summary_text())
         highlighted_index = entry_list.highlighted
         entry_list.clear_options()
         for index, entry in enumerate(self.entries, start=1):
