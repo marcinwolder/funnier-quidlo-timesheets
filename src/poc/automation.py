@@ -263,7 +263,8 @@ async def fill_task_description(page: Page, description: str) -> None:
 
 async def fill_duration(page: Page, duration: str) -> None:
     duration_input = page.locator("input[name='timer-duration']").first
-    await fill_text_input(duration_input, duration)
+    await duration_input.wait_for(state="visible", timeout=3000)
+    await duration_input.fill(duration)
 
 
 async def fill_project(page: Page, project_name: str) -> None:
@@ -278,12 +279,13 @@ async def fill_project(page: Page, project_name: str) -> None:
 async def fill_tags(page: Page, tags: Iterable[str]) -> None:
     tags_input = page.locator("input:not([name])").nth(1)
     await tags_input.wait_for(state="visible", timeout=3000)
-    for tag in tags:
-        await tags_input.click()
-        await tags_input.fill(tag)
+    tag_list = tuple(tags)
+    for index, tag in enumerate(tag_list):
+        await fill_text_input(tags_input, tag)
         await click_autocomplete_option(page, tag)
-        await wait_for_autocomplete_value(page, "timer-tags", tag)
-
+        await wait_for_selected_tag(page, tag)
+        if index < len(tag_list) - 1:
+            await clear_autocomplete_input(tags_input)
 
 async def click_submit(page: Page) -> None:
     button = page.locator(".TimeEntryForm_button__2SB3n [tabindex='0']").first
@@ -309,7 +311,25 @@ async def click_autocomplete_option(page: Page, text: str) -> None:
     await page.wait_for_timeout(500)
 
 
-async def wait_for_autocomplete_value(page: Page, field_id: str, text: str) -> None:
+async def wait_for_autocomplete_value(
+    page: Page,
+    field_id: str,
+    text: str,
+) -> None:
     field = page.locator(f"label[for='{field_id}']").first.locator("xpath=..")
     value = field.locator("[class*='Autocomplete_value']")
     await value.filter(has_text=text).first.wait_for(state="visible", timeout=5000)
+
+
+async def wait_for_selected_tag(page: Page, tag: str) -> None:
+    pattern = re.compile(rf"^{re.escape(tag)}$")
+    selected_tag = page.locator(
+        "[class*='Autocomplete_optionsContainer'] [class*='Autocomplete_checked']",
+    ).filter(has_text=pattern).first
+    await selected_tag.wait_for(state="visible", timeout=5000)
+
+
+async def clear_autocomplete_input(locator: Locator) -> None:
+    await locator.click()
+    await locator.press("Meta+a")
+    await locator.press("Backspace")
