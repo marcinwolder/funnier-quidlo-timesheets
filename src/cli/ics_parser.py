@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import recurring_ical_events  # pyright: ignore[reportMissingTypeStubs]
 from icalendar import Calendar
@@ -51,15 +51,23 @@ def parse_ics_bytes(
             if not component.get("RRULE")
         ]
 
-    entries: list[EntryData] = []
+    fields: list[_EventFields] = []
     for event in cast("list[Component]", events):
-        entry = _event_to_entry(event)
-        if entry is not None:
-            entries.append(entry)
-    return entries
+        parsed = _event_to_fields(event)
+        if parsed is not None:
+            fields.append(parsed)
+    return _merge_matching_entries(fields)
 
 
-def _event_to_entry(event: Component) -> EntryData | None:
+class _EventFields(NamedTuple):
+    date_iso: str
+    project: str
+    description: str
+    tags: tuple[str, ...]
+    duration: timedelta
+
+
+def _event_to_fields(event: Component) -> _EventFields | None:
     dtstart = event.get("DTSTART")
     dtend = event.get("DTEND")
     if dtstart is None or dtend is None:
@@ -84,20 +92,50 @@ def _event_to_entry(event: Component) -> EntryData | None:
     body = str(raw_description) if raw_description is not None else ""
     tags = tuple(_TAG_RE.findall(body))
 
-    duration = _format_duration(end_dt - start_dt)
     date_iso = (
         start_dt.date().isoformat()
         if isinstance(start_dt, datetime)
         else start_dt.isoformat()
     )
 
-    return EntryData(
+    return _EventFields(
         date_iso=date_iso,
-        duration=duration,
-        description=description,
         project=project,
+        description=description,
         tags=tags,
+        duration=end_dt - start_dt,
     )
+
+
+def _merge_matching_entries(fields: list[_EventFields]) -> list[EntryData]:
+    """Merge same-day events sharing project/description/tags, summing duration.
+
+    Calendars often split one logical activity into several occurrences on
+    the same day (e.g. a recurring meeting interrupted by a break), so events
+    that are otherwise identical are collapsed into a single timesheet entry.
+    """
+    totals: dict[tuple[str, str, str, tuple[str, ...]], timedelta] = {}
+    order: list[tuple[str, str, str, tuple[str, ...]]] = []
+    for date_iso, project, description, tags, duration in fields:
+        key = (date_iso, project, description, tags)
+        if key not in totals:
+            order.append(key)
+            totals[key] = timedelta()
+        totals[key] += duration
+
+    entries: list[EntryData] = []
+    for date_iso, project, description, tags in order:
+        duration = totals[(date_iso, project, description, tags)]
+        entries.append(
+            EntryData(
+                date_iso=date_iso,
+                duration=_format_duration(duration),
+                description=description,
+                project=project,
+                tags=tags,
+            ),
+        )
+    return entries
 
 
 def _format_duration(td: timedelta) -> str:
