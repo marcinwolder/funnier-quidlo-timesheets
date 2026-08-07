@@ -426,10 +426,16 @@ class TimeTrackerApp(App[None]):
             self.set_status("Nothing to submit. Add at least one staged entry.")
             return
 
+        submitted_total = len(self.entries)
         self.set_status("Submitting staged entries in the browser...")
         try:
             await submit_entries(self.entries)
         except SubmissionError as exc:
+            submitted_count = exc.entry_index - 1
+            if submitted_count > 0:
+                del self.entries[:submitted_count]
+                self.selected_index = None
+                self.refresh_entry_list()
             self.set_status(
                 f"Submission stopped on entry {exc.entry_index}: {exc.entry.summary}",
             )
@@ -447,9 +453,12 @@ class TimeTrackerApp(App[None]):
             self.push_screen(InfoScreen(f"Submission failed.\n\n{exc}"))
             return
 
-        self.set_status(f"Submitted {len(self.entries)} entries.")
+        self.entries.clear()
+        self.selected_index = None
+        self.refresh_entry_list()
+        self.set_status(f"Submitted {submitted_total} entries.")
         self.push_screen(
-            InfoScreen(f"Submitted {len(self.entries)} entries successfully."),
+            InfoScreen(f"Submitted {submitted_total} entries successfully."),
         )
 
     def action_reset_form(self) -> None:
@@ -483,6 +492,18 @@ class TimeTrackerApp(App[None]):
 
         if not date_iso or not duration or not description or not project:
             self.set_status("Date, duration, description, and project are required.")
+            return None
+
+        try:
+            date.fromisoformat(date_iso)
+        except ValueError:
+            self.set_status(f"Invalid date: {date_iso!r}. Use YYYY-MM-DD.")
+            return None
+
+        try:
+            self.parse_duration_minutes(duration)
+        except ValueError:
+            self.set_status(f"Invalid duration: {duration!r}. Use e.g. 1h, 30m.")
             return None
 
         tags = tuple(tag.strip() for tag in tags_value.split(",") if tag.strip())

@@ -67,6 +67,8 @@ async def submit_entries(entries: Sequence[EntryData]) -> None:
                     sys.stdout.write(f"{progress}\n")
             finally:
                 await context.close()
+    except SubmissionError:
+        raise
     except (OSError, PlaywrightError, RuntimeError) as exc:
         raise AutomationError(str(exc)) from exc
 
