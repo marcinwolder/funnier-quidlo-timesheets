@@ -292,6 +292,9 @@ class TimeTrackerApp(App[None]):
 
     @on(Button.Pressed, "#ics-import")
     def handle_ics_import(self) -> None:
+        if self._submission_worker is not None:
+            self.set_status("Finish or cancel the current submission first.")
+            return
         path = self.query_one("#ics-file", Input).value.strip()
         if not path:
             self.set_status("Enter the path to a .ics file.")
@@ -349,6 +352,9 @@ class TimeTrackerApp(App[None]):
 
     @on(Button.Pressed, "#remote-calendar-import")
     def handle_remote_calendar_import(self) -> None:
+        if self._submission_worker is not None:
+            self.set_status("Finish or cancel the current submission first.")
+            return
         name_input = self.query_one("#remote-calendar-name", Input)
         url_input = self.query_one("#remote-calendar-url", Input)
         name = name_input.value.strip()

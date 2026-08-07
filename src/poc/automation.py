@@ -4,6 +4,7 @@ import asyncio
 import re
 import sys
 from datetime import date, datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -66,12 +67,15 @@ async def submit_entries(
                     status("Login detected. Resuming submission...")
 
                 for index, entry in enumerate(sorted_entries, start=1):
+                    on_accepted = (
+                        None
+                        if on_entry_submitted is None
+                        else partial(on_entry_submitted, index)
+                    )
                     try:
-                        await submit_entry(page, entry)
+                        await submit_entry(page, entry, on_accepted=on_accepted)
                     except (OSError, PlaywrightError, RuntimeError) as exc:
                         raise SubmissionError(index, entry, exc) from exc
-                    if on_entry_submitted is not None:
-                        on_entry_submitted(index)
                     status(
                         f"Submitted entry {index}/{len(sorted_entries)}: "
                         f"{entry.summary}",
@@ -88,13 +92,24 @@ def submit_entries_sync(entries: Sequence[EntryData]) -> None:
     asyncio.run(submit_entries(entries))
 
 
-async def submit_entry(page: Page, entry: EntryData) -> None:
+async def submit_entry(
+    page: Page,
+    entry: EntryData,
+    *,
+    on_accepted: Callable[[], None] | None = None,
+) -> None:
     await select_entry_date(page, entry.date_iso)
     await fill_task_description(page, entry.description)
     await fill_project(page, entry.project)
     await fill_tags(page, entry.tags)
     await fill_duration(page, entry.duration)
     await click_submit(page)
+    # Quidlo has accepted the entry at this point, so mark it submitted
+    # before the cancellable settle delay below - otherwise a cancellation
+    # during that delay would leave an already-accepted entry staged for
+    # re-submission, creating a duplicate.
+    if on_accepted is not None:
+        on_accepted()
     await page.wait_for_timeout(3000)
 
 
