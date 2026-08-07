@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import date, datetime
 from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from textual import on
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.suggester import SuggestFromList
@@ -38,6 +40,9 @@ from poc.automation import (
     submit_entries,
 )
 from poc.models import EntryData
+
+if TYPE_CHECKING:
+    from textual.worker import Worker
 
 CALENDARS_DIR = Path(__file__).resolve().parent.parent.parent / "calendars"
 _DURATION_PART_RE = re.compile(r"(?P<value>\d+)\s*(?P<unit>[hm])", re.IGNORECASE)
@@ -171,6 +176,7 @@ class TimeTrackerApp(App[None]):
     BINDINGS: ClassVar = [
         ("ctrl+a", "add_entry", "Add"),
         ("ctrl+s", "submit_entries", "Submit All"),
+        Binding("ctrl+g", "cancel_submission", "Cancel Submission", priority=True),
         ("delete", "delete_selected", "Delete"),
         ("escape", "reset_form", "Reset Form"),
         ("q", "quit", "Quit"),
@@ -181,6 +187,7 @@ class TimeTrackerApp(App[None]):
         self.entries: list[EntryData] = []
         self.remote_calendars: list[RemoteCalendar] = []
         self.selected_index: int | None = None
+        self._submission_worker: Worker[None] | None = None
 
     @staticmethod
     def local_today() -> date:
@@ -241,6 +248,12 @@ class TimeTrackerApp(App[None]):
                         variant="warning",
                     )
                     yield Button("Submit All", id="submit-all", variant="success")
+                    yield Button(
+                        "Cancel",
+                        id="cancel-submission",
+                        variant="error",
+                        disabled=True,
+                    )
         yield Static("Ready.", id="status")
         yield Footer()
 
@@ -266,8 +279,12 @@ class TimeTrackerApp(App[None]):
         self.action_delete_all_entries()
 
     @on(Button.Pressed, "#submit-all")
-    async def handle_submit(self) -> None:
-        await self.action_submit_entries()
+    def handle_submit(self) -> None:
+        self.action_submit_entries()
+
+    @on(Button.Pressed, "#cancel-submission")
+    def handle_cancel_submission(self) -> None:
+        self.action_cancel_submission()
 
     @on(Button.Pressed, "#reset-form")
     def handle_reset(self) -> None:
@@ -391,6 +408,9 @@ class TimeTrackerApp(App[None]):
         self.set_status(f"Loaded entry {self.selected_index + 1} into the form.")
 
     def action_add_entry(self) -> None:
+        if self._submission_worker is not None:
+            self.set_status("Finish or cancel the current submission first.")
+            return
         entry = self.build_entry_from_form()
         if entry is None:
             return
@@ -401,6 +421,9 @@ class TimeTrackerApp(App[None]):
         self.set_status(f"Added entry {added_index}.")
 
     def action_delete_selected(self) -> None:
+        if self._submission_worker is not None:
+            self.set_status("Finish or cancel the current submission first.")
+            return
         if self.selected_index is None or self.selected_index >= len(self.entries):
             self.set_status("Highlight a staged entry to delete.")
             return
@@ -411,6 +434,9 @@ class TimeTrackerApp(App[None]):
         self.set_status(f"Deleted entry: {removed.summary}")
 
     def action_delete_all_entries(self) -> None:
+        if self._submission_worker is not None:
+            self.set_status("Finish or cancel the current submission first.")
+            return
         if not self.entries:
             self.set_status("No staged entries to delete.")
             return
@@ -421,15 +447,51 @@ class TimeTrackerApp(App[None]):
         self.refresh_entry_list()
         self.set_status(f"Deleted all staged entries ({removed_count}).")
 
-    async def action_submit_entries(self) -> None:
+    def action_submit_entries(self) -> None:
+        if self._submission_worker is not None:
+            self.set_status("A submission is already in progress.")
+            return
         if not self.entries:
             self.set_status("Nothing to submit. Add at least one staged entry.")
             return
 
-        submitted_total = len(self.entries)
         self.set_status("Submitting staged entries in the browser...")
+        self.set_submitting_state(submitting=True)
+        # Runs as an independent asyncio task (a Textual worker) rather than
+        # being awaited here: awaiting it directly would block this app's
+        # single message-dispatch loop for the whole submission, so no other
+        # key or button press (including Cancel) could be processed until it
+        # finished.
+        self._submission_worker = self.run_worker(
+            self._run_submission(),
+            name="submit-entries",
+            exclusive=True,
+        )
+
+    async def _run_submission(self) -> None:
+        submitted_total = len(self.entries)
+        last_submitted_index = 0
+
+        def handle_entry_submitted(index: int) -> None:
+            nonlocal last_submitted_index
+            last_submitted_index = index
+
         try:
-            await submit_entries(self.entries)
+            await submit_entries(
+                self.entries,
+                on_status=self.set_status,
+                on_entry_submitted=handle_entry_submitted,
+            )
+        except asyncio.CancelledError:
+            if last_submitted_index > 0:
+                del self.entries[:last_submitted_index]
+                self.selected_index = None
+                self.refresh_entry_list()
+            self.set_status(
+                f"Submission cancelled after "
+                f"{last_submitted_index}/{submitted_total} entries.",
+            )
+            raise
         except SubmissionError as exc:
             submitted_count = exc.entry_index - 1
             if submitted_count > 0:
@@ -452,6 +514,9 @@ class TimeTrackerApp(App[None]):
             self.set_status(f"Submission stopped on error: {exc}")
             self.push_screen(InfoScreen(f"Submission failed.\n\n{exc}"))
             return
+        finally:
+            self._submission_worker = None
+            self.set_submitting_state(submitting=False)
 
         self.entries.clear()
         self.selected_index = None
@@ -460,6 +525,17 @@ class TimeTrackerApp(App[None]):
         self.push_screen(
             InfoScreen(f"Submitted {submitted_total} entries successfully."),
         )
+
+    def action_cancel_submission(self) -> None:
+        if self._submission_worker is None:
+            self.set_status("No submission in progress to cancel.")
+            return
+        self.set_status("Cancelling submission...")
+        self._submission_worker.cancel()
+
+    def set_submitting_state(self, *, submitting: bool) -> None:
+        self.query_one("#submit-all", Button).disabled = submitting
+        self.query_one("#cancel-submission", Button).disabled = not submitting
 
     def action_reset_form(self) -> None:
         self.selected_index = None
@@ -472,6 +548,9 @@ class TimeTrackerApp(App[None]):
         self.set_status("Form reset.")
 
     def update_selected_entry(self) -> None:
+        if self._submission_worker is not None:
+            self.set_status("Finish or cancel the current submission first.")
+            return
         if self.selected_index is None or self.selected_index >= len(self.entries):
             self.set_status("Select a staged entry to update.")
             return

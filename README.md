@@ -23,7 +23,7 @@ cd src
 uv run cli
 ```
 
-Przy pierwszym uruchomieniu i próbie wysyłki otworzy się okno przeglądarki – trzeba zalogować się ręcznie do Quidlo. Sesja jest zapamiętywana w profilu przeglądarki (`src/.playwright-profile`), więc kolejne uruchomienia nie wymagają ponownego logowania.
+Przy pierwszym uruchomieniu i próbie wysyłki otworzy się okno przeglądarki – trzeba zalogować się ręcznie do Quidlo. Aplikacja automatycznie wykrywa zakończenie logowania (odpytuje stronę w tle) i sama wznawia wysyłkę – nie trzeba nic potwierdzać w terminalu. Sesja jest zapamiętywana w profilu przeglądarki (`src/.playwright-profile`), więc kolejne uruchomienia nie wymagają ponownego logowania.
 
 ## Funkcje
 
@@ -31,7 +31,7 @@ Przy pierwszym uruchomieniu i próbie wysyłki otworzy się okno przeglądarki �
 - **Zakładka From .ics** – import wpisów z pliku `.ics` (z podpowiadaniem nazw plików z katalogu `calendars/`) z opcjonalnym filtrem zakresu dat.
 - **Zakładka Remote calendar** – zapisywanie nazwanych subskrypcji kalendarza (nazwa + URL), wczytywanie ich ponownie oraz import wpisów bezpośrednio ze zdalnego adresu, z tym samym filtrem dat.
 - **Lista wpisów roboczych (staging)** – podgląd wszystkich dodanych/zaimportowanych wpisów z sumą czasu, przed wysyłką.
-- **Wysyłka wsadowa** – jednym przyciskiem/skrótem wysyła wszystkie wpisy z listy do Quidlo przez Playwright; w razie błędu zatrzymuje się na pierwszym nieudanym wpisie.
+- **Wysyłka wsadowa** – jednym przyciskiem/skrótem wysyła wszystkie wpisy z listy do Quidlo przez Playwright; w razie błędu zatrzymuje się na pierwszym nieudanym wpisie. Wysyłkę można w każdej chwili przerwać (przycisk „Cancel” lub `Ctrl+G`) – wpisy już wysłane są usuwane z listy roboczej, reszta zostaje do ponownej wysyłki.
 
 ### Skróty klawiszowe w TUI
 
@@ -39,6 +39,7 @@ Przy pierwszym uruchomieniu i próbie wysyłki otworzy się okno przeglądarki �
 |------------|-------------------------------|
 | `Ctrl+A`   | Dodaj wpis z formularza       |
 | `Ctrl+S`   | Wyślij wszystkie wpisy        |
+| `Ctrl+G`   | Przerwij trwającą wysyłkę     |
 | `Delete`   | Usuń zaznaczony wpis          |
 | `Escape`   | Wyczyść formularz             |
 | `Q`        | Wyjście                       |

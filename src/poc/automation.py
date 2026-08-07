@@ -11,12 +11,13 @@ from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Locator, Page, async_playwright
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
     from poc.models import EntryData
 
 TRACKER_URL = "https://timesheets.quidlo.com/tracker"
 PROFILE_DIR = Path(__file__).resolve().parent.parent / ".playwright-profile"
+LOGIN_POLL_INTERVAL_MS = 1500
 
 
 class SubmissionError(RuntimeError):
@@ -31,8 +32,18 @@ class AutomationError(RuntimeError):
     """Raised when browser automation fails outside a single entry submission."""
 
 
-async def submit_entries(entries: Sequence[EntryData]) -> None:
+def _default_on_status(message: str) -> None:
+    sys.stdout.write(f"{message}\n")
+
+
+async def submit_entries(
+    entries: Sequence[EntryData],
+    *,
+    on_status: Callable[[str], None] | None = None,
+    on_entry_submitted: Callable[[int], None] | None = None,
+) -> None:
     sorted_entries = sort_entries_for_submission(entries)
+    status = on_status or _default_on_status
 
     try:
         async with async_playwright() as playwright:
@@ -47,24 +58,24 @@ async def submit_entries(entries: Sequence[EntryData]) -> None:
                 await load_tracker(page)
 
                 if await requires_login(page):
-                    message = (
+                    status(
                         "Login required in the opened browser window. "
-                        "Complete login, then press Enter here."
+                        "Waiting for you to sign in...",
                     )
-                    sys.stdout.write(f"{message}\n")
-                    await asyncio.to_thread(input)
-                    await load_tracker(page)
+                    await wait_for_login(page)
+                    status("Login detected. Resuming submission...")
 
                 for index, entry in enumerate(sorted_entries, start=1):
                     try:
                         await submit_entry(page, entry)
                     except (OSError, PlaywrightError, RuntimeError) as exc:
                         raise SubmissionError(index, entry, exc) from exc
-                    progress = (
+                    if on_entry_submitted is not None:
+                        on_entry_submitted(index)
+                    status(
                         f"Submitted entry {index}/{len(sorted_entries)}: "
-                        f"{entry.summary}"
+                        f"{entry.summary}",
                     )
-                    sys.stdout.write(f"{progress}\n")
             finally:
                 await context.close()
     except SubmissionError:
@@ -111,6 +122,12 @@ async def requires_login(page: Page) -> bool:
     if "login" in url or "auth" in url:
         return True
     return await page.get_by_text("Sign in", exact=False).count() > 0
+
+
+async def wait_for_login(page: Page) -> None:
+    while await requires_login(page):
+        await page.wait_for_timeout(LOGIN_POLL_INTERVAL_MS)
+    await load_tracker(page)
 
 
 async def select_entry_date(page: Page, date_iso: str) -> None:
