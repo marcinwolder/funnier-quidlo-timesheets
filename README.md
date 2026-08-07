@@ -1,104 +1,76 @@
-# Google Calendar `.ics` to Time Tracker CLI
+# Quidlo Timesheets – Time Tracker
 
-Personal local CLI for importing time entries from a Google Calendar `.ics` export into a company time-tracking website.
+Osobiste narzędzie CLI/TUI do importowania wpisów czasu pracy z kalendarza (plik `.ics` lub zdalny link) i wysyłania ich na [timesheets.quidlo.com](https://timesheets.quidlo.com/tracker).
 
-## Summary
+## Wymagania
 
-The application will:
+- Python 3.13
+- [uv](https://docs.astral.sh/uv/)
+- Przeglądarka Chromium dla Playwright
 
-- Read a Google Calendar `.ics` export file.
-- Let the user select a time period at runtime.
-- Reuse an authenticated browser session through a dedicated Playwright profile.
-- Validate and preview entries before any submission.
-- Detect likely duplicates and skip them by default.
-- Fail on unknown project or tag values instead of guessing.
+## Instalacja
 
-## V1 Scope
+```bash
+cd src
+uv sync
+uv run playwright install chromium
+```
 
-- Python CLI application
-- Playwright browser automation
-- Persistent Chromium profile for manual SSO/MFA login reuse
-- Review step in the terminal before submission
-- One calendar event maps to one time entry on the website
-- Interactive time-period selection for `preview` and `submit`
+## Uruchomienie
 
-## Input Contract
+```bash
+cd src
+uv run cli
+```
 
-Input file:
+Przy pierwszym uruchomieniu i próbie wysyłki otworzy się okno przeglądarki – trzeba zalogować się ręcznie do Quidlo. Sesja jest zapamiętywana w profilu przeglądarki (`src/.playwright-profile`), więc kolejne uruchomienia nie wymagają ponownego logowania.
 
-- Google Calendar `.ics` export
+## Funkcje
 
-Required event format:
+- **Zakładka Manual** – ręczne dodawanie wpisu (data, czas trwania, opis, projekt, tagi), edycja i usuwanie wpisów z listy.
+- **Zakładka From .ics** – import wpisów z pliku `.ics` (z podpowiadaniem nazw plików z katalogu `calendars/`) z opcjonalnym filtrem zakresu dat.
+- **Zakładka Remote calendar** – zapisywanie nazwanych subskrypcji kalendarza (nazwa + URL), wczytywanie ich ponownie oraz import wpisów bezpośrednio ze zdalnego adresu, z tym samym filtrem dat.
+- **Lista wpisów roboczych (staging)** – podgląd wszystkich dodanych/zaimportowanych wpisów z sumą czasu, przed wysyłką.
+- **Wysyłka wsadowa** – jednym przyciskiem/skrótem wysyła wszystkie wpisy z listy do Quidlo przez Playwright; w razie błędu zatrzymuje się na pierwszym nieudanym wpisie.
 
-- Title must be `[Project] Description`
-- Event description/body may contain tags as hashtags such as `#billable #client-a`
+### Skróty klawiszowe w TUI
 
-Import rules:
+| Skrót      | Akcja                        |
+|------------|-------------------------------|
+| `Ctrl+A`   | Dodaj wpis z formularza       |
+| `Ctrl+S`   | Wyślij wszystkie wpisy        |
+| `Delete`   | Usuń zaznaczony wpis          |
+| `Escape`   | Wyczyść formularz             |
+| `Q`        | Wyjście                       |
 
-- `project`: parsed from the bracketed title prefix
-- `description`: parsed from the title text after the project prefix
-- `tags`: parsed from hashtags in the event body
-- `date`: derived from the event start date
-- `duration`: derived from the event start and end times
+## Gdzie umieszczać pliki kalendarza
 
-If the event body contains only tags, the final time-entry description comes from the title text after `[Project]`.
+Pliki `.ics` wrzucaj do katalogu `calendars/` w głównym folderze repozytorium. Będą wtedy podpowiadane w polu „ICS file” w zakładce **From .ics**. Katalog ma wpis `.gitignore` na `*.ics`, więc kalendarze nie trafiają do repozytorium.
 
-Example event:
+## Wymagany format wydarzeń w kalendarzu
 
-- Title: `[Internal Tooling] Implement import flow`
-- Description: `#billable #automation`
-- Time: `2026-04-30 09:00` to `2026-04-30 17:00`
+- **Tytuł** wydarzenia musi mieć format `[Projekt] Opis`, np. `[Internal Tooling] Implement import flow`.
+- **Opis/treść** wydarzenia może zawierać tagi jako hashtagi, np. `#billable #client-a`.
+- Data i czas trwania są wyliczane z godziny startu/końca wydarzenia.
+- Wydarzenia całodniowe (bez godziny) są pomijane.
 
-Derived entry:
+Przykład:
 
-- `project`: `Internal Tooling`
-- `description`: `Implement import flow`
-- `tags`: `billable`, `automation`
-- `date`: `2026-04-30`
-- `duration`: `08:00`
+- Tytuł: `[Internal Tooling] Implement import flow`
+- Opis: `#billable #automation`
+- Czas: `09:00–17:00`
 
-## Planned Commands
+→ da wpis: projekt `Internal Tooling`, opis `Implement import flow`, tagi `billable, automation`, czas trwania `8h`.
 
-- `login`: open the persistent browser profile so the user can log in manually.
-- `preview <ics_path>`: parse, filter, validate, map, and classify events without submitting.
-- `submit <ics_path>`: run checks, show a review summary, and submit only confirmed rows.
+## Zdalne kalendarze
 
-## Time Period Selection
+W zakładce **Remote calendar** można zapisać subskrypcję pod nazwą i adresem URL – zapisywane są lokalnie w `src/.remote_calendars.json` (poza repozytorium). Obsługiwane adresy:
 
-For `preview` and `submit`, the script will ask which time period to process:
+- `http://` / `https://` – link do pliku `.ics`
+- `webcal://` / `webcals://` – automatycznie zamieniane na `https://`
+- link z ustawień kalendarza Google zawierający `cid=...` – automatycznie zamieniany na publiczny link `.ics`
 
-- single day
-- last month
-- custom date range
+## Znane ograniczenia
 
-Filtering rules:
-
-- filtering uses the event start date
-- `last month` means the previous full calendar month
-
-## Validation and Submission Rules
-
-- Strictly validate the required event title format.
-- Reject all-day events as unsupported.
-- Reject unknown projects or tags unless explicitly mapped.
-- Detect likely duplicates using `date + duration + project + description`.
-- Classify rows as valid, duplicate, validation error, or mapping error.
-- Require explicit confirmation before submitting any row.
-
-## Configuration
-
-The app will use a local config file for:
-
-- time-tracking site URL
-- selector definitions for form fields and duplicate checks
-- Playwright profile path
-- optional explicit mappings for project and tag normalization
-
-## Out of Scope for V1
-
-- CSV input
-- Google Calendar API integration
-- Fuzzy matching for projects or tags
-- Editing existing time entries
-- Deleting entries
-- GUI beyond CLI output and prompts
+- Selektory na stronie Quidlo nie są w pełni zweryfikowane – w razie zmian na stronie automatyzacja może przestać działać.
+- Wysyłka wsadowa zatrzymuje się na pierwszym błędzie i nie wznawia się automatycznie.

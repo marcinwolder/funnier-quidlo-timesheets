@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "src"
+version = "0.1.0"
+description = "POC for submitting a Quidlo Timesheets entry with Playwright"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "icalendar>=5.0",
+    "playwright>=1.54.0",
+    "recurring-ical-events>=2.0",
+    "textual>=0.61.0",
+]
+
+[project.scripts]
+cli = "cli.__main__:main"
+poc = "poc.__main__:main"
+
+[project.optional-dependencies]
+dev = ["pyright>=1.1.410", "ruff>=0.15.17"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["cli", "poc"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = ["D"]
+
+[tool.pyright]
+venvPath = './.venv'
+exclude = ["**/__pycache__", "**/.venv"]
+typeCheckingMode = 'strict'
