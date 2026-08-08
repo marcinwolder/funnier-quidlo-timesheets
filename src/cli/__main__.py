@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
@@ -35,17 +34,18 @@ from cli.remote_calendars import (
 )
 from poc.automation import (
     AutomationError,
-    SubmissionError,
+    DaySyncResult,
+    SyncError,
     sort_entries_for_submission,
-    submit_entries,
+    sync_entries,
 )
+from poc.duration import format_duration_minutes, parse_duration_minutes
 from poc.models import EntryData
 
 if TYPE_CHECKING:
     from textual.worker import Worker
 
 CALENDARS_DIR = Path(__file__).resolve().parent.parent.parent / "calendars"
-_DURATION_PART_RE = re.compile(r"(?P<value>\d+)\s*(?P<unit>[hm])", re.IGNORECASE)
 
 
 class InfoScreen(ModalScreen[None]):
@@ -461,11 +461,11 @@ class TimeTrackerApp(App[None]):
             self.set_status("Nothing to submit. Add at least one staged entry.")
             return
 
-        self.set_status("Submitting staged entries in the browser...")
+        self.set_status("Syncing staged entries with the browser...")
         self.set_submitting_state(submitting=True)
         # Runs as an independent asyncio task (a Textual worker) rather than
         # being awaited here: awaiting it directly would block this app's
-        # single message-dispatch loop for the whole submission, so no other
+        # single message-dispatch loop for the whole sync, so no other
         # key or button press (including Cancel) could be processed until it
         # finished.
         self._submission_worker = self.run_worker(
@@ -476,49 +476,48 @@ class TimeTrackerApp(App[None]):
 
     async def _run_submission(self) -> None:
         submitted_total = len(self.entries)
-        last_submitted_index = 0
+        processed_dates: set[str] = set()
 
-        def handle_entry_submitted(index: int) -> None:
-            nonlocal last_submitted_index
-            last_submitted_index = index
+        def handle_day_synced(result: DaySyncResult) -> None:
+            processed_dates.add(result.date_iso)
+            self.set_status(
+                f"Day {result.date_iso}: +{result.inserted} added, "
+                f"{result.updated} updated, {result.deleted} deleted, "
+                f"{result.skipped} unchanged.",
+            )
+
+        def remove_processed_days() -> None:
+            if not processed_dates:
+                return
+            self.entries = [
+                entry for entry in self.entries if entry.date_iso not in processed_dates
+            ]
+            self.selected_index = None
+            self.refresh_entry_list()
 
         try:
-            await submit_entries(
+            await sync_entries(
                 self.entries,
                 on_status=self.set_status,
-                on_entry_submitted=handle_entry_submitted,
+                on_day_synced=handle_day_synced,
             )
         except asyncio.CancelledError:
-            if last_submitted_index > 0:
-                del self.entries[:last_submitted_index]
-                self.selected_index = None
-                self.refresh_entry_list()
+            remove_processed_days()
             self.set_status(
-                f"Submission cancelled after "
-                f"{last_submitted_index}/{submitted_total} entries.",
+                f"Sync cancelled after {len(processed_dates)} day(s) processed.",
             )
             raise
-        except SubmissionError as exc:
-            submitted_count = exc.entry_index - 1
-            if submitted_count > 0:
-                del self.entries[:submitted_count]
-                self.selected_index = None
-                self.refresh_entry_list()
-            self.set_status(
-                f"Submission stopped on entry {exc.entry_index}: {exc.entry.summary}",
-            )
+        except SyncError as exc:
+            remove_processed_days()
+            self.set_status(f"Sync stopped: {exc}")
             self.push_screen(
-                InfoScreen(
-                    (
-                        f"Submission failed on entry {exc.entry_index}.\n\n"
-                        f"{exc.entry.summary}\n\nCause: {exc.__cause__}"
-                    ),
-                ),
+                InfoScreen(f"Sync failed.\n\n{exc}\n\nCause: {exc.__cause__}"),
             )
             return
         except AutomationError as exc:
-            self.set_status(f"Submission stopped on error: {exc}")
-            self.push_screen(InfoScreen(f"Submission failed.\n\n{exc}"))
+            remove_processed_days()
+            self.set_status(f"Sync stopped on error: {exc}")
+            self.push_screen(InfoScreen(f"Sync failed.\n\n{exc}"))
             return
         finally:
             self._submission_worker = None
@@ -527,9 +526,9 @@ class TimeTrackerApp(App[None]):
         self.entries.clear()
         self.selected_index = None
         self.refresh_entry_list()
-        self.set_status(f"Submitted {submitted_total} entries.")
+        self.set_status(f"Synced {submitted_total} staged entries.")
         self.push_screen(
-            InfoScreen(f"Submitted {submitted_total} entries successfully."),
+            InfoScreen(f"Synced {submitted_total} staged entries successfully."),
         )
 
     def action_cancel_submission(self) -> None:
@@ -586,7 +585,7 @@ class TimeTrackerApp(App[None]):
             return None
 
         try:
-            self.parse_duration_minutes(duration)
+            parse_duration_minutes(duration)
         except ValueError:
             self.set_status(f"Invalid duration: {duration!r}. Use e.g. 1h, 30m.")
             return None
@@ -814,33 +813,11 @@ class TimeTrackerApp(App[None]):
         ]
         return "  ".join(cells)
 
-    @staticmethod
-    def parse_duration_minutes(duration: str) -> int:
-        total_minutes = 0
-        matched = False
-        for match in _DURATION_PART_RE.finditer(duration):
-            matched = True
-            value = int(match.group("value"))
-            unit = match.group("unit").lower()
-            total_minutes += value * 60 if unit == "h" else value
-        if not matched:
-            raise ValueError(f"Unsupported duration format: {duration}")
-        return total_minutes
-
-    @staticmethod
-    def format_total_duration(total_minutes: int) -> str:
-        hours, minutes = divmod(total_minutes, 60)
-        if hours and minutes:
-            return f"{hours}h {minutes}m"
-        if hours:
-            return f"{hours}h"
-        return f"{minutes}m"
-
     def entry_summary_text(self) -> str:
         total_minutes = sum(
-            self.parse_duration_minutes(entry.duration) for entry in self.entries
+            parse_duration_minutes(entry.duration) for entry in self.entries
         )
-        total_duration = self.format_total_duration(total_minutes)
+        total_duration = format_duration_minutes(total_minutes)
         entry_label = "record" if len(self.entries) == 1 else "records"
         return f"Total: {total_duration} across {len(self.entries)} {entry_label}"
 

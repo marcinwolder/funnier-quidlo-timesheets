@@ -32,9 +32,23 @@ The automation currently:
 - opens `https://timesheets.quidlo.com/tracker`
 - reuses a persistent Chromium profile in `src/.playwright-profile`
 - waits for manual login if needed
-- submits each staged entry in sequence
+- groups staged entries by day and syncs each day in one pass:
+  - selects the day's date once (not once per entry)
+  - reads back the entries already on Quidlo for that day
+  - diffs them against the staged calendar entries (see `poc/day_sync.py`)
+    and inserts new ones, updates ones whose duration/tags/title changed,
+    deletes ones no longer present in the calendar, and skips unchanged ones
+  - runs delete -> update -> insert for the day, then moves to the next day,
+    with no confirmation step in between
 
 ## Notes
 
-- The live page selectors have not been fully verified yet.
-- Batch submission stops on the first submission error.
+- The live page selectors have not been fully verified yet, especially the
+  new day-entry read/edit/delete selectors in `poc/automation.py`
+  (`read_day_entries`, `edit_entry`, `delete_entry`) - inspect the real
+  tracker day view and adjust them before relying on this for real data.
+- Deletion has no notion of "added by this bot" - any Quidlo entry for a
+  synced day that has no calendar counterpart is deleted, including entries
+  added manually straight in Quidlo.
+- Sync stops on the first error, but days that already fully synced are not
+  retried when resuming.

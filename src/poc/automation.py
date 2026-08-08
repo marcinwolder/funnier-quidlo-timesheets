@@ -3,18 +3,20 @@ from __future__ import annotations
 import asyncio
 import re
 import sys
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Locator, Page, async_playwright
 
+from poc.day_sync import DayDiffPlan, ExistingEntry, compute_day_diff
+from poc.models import EntryData
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
-
-    from poc.models import EntryData
 
 TRACKER_URL = "https://timesheets.quidlo.com/tracker"
 PROFILE_DIR = Path(__file__).resolve().parent.parent / ".playwright-profile"
@@ -29,8 +31,32 @@ class SubmissionError(RuntimeError):
         self.__cause__ = cause
 
 
+class SyncError(RuntimeError):
+    def __init__(
+        self,
+        date_iso: str,
+        operation: str,
+        entry: EntryData,
+        cause: Exception,
+    ) -> None:
+        super().__init__(f"{operation} failed for {date_iso}: {entry.summary}")
+        self.date_iso = date_iso
+        self.operation = operation
+        self.entry = entry
+        self.__cause__ = cause
+
+
 class AutomationError(RuntimeError):
     """Raised when browser automation fails outside a single entry submission."""
+
+
+@dataclass(frozen=True)
+class DaySyncResult:
+    date_iso: str
+    inserted: int
+    updated: int
+    deleted: int
+    skipped: int
 
 
 def _default_on_status(message: str) -> None:
@@ -92,6 +118,110 @@ def submit_entries_sync(entries: Sequence[EntryData]) -> None:
     asyncio.run(submit_entries(entries))
 
 
+async def sync_entries(
+    entries: Sequence[EntryData],
+    *,
+    on_status: Callable[[str], None] | None = None,
+    on_day_synced: Callable[[DaySyncResult], None] | None = None,
+) -> list[DaySyncResult]:
+    """Reconcile staged entries against Quidlo, one calendar day at a time.
+
+    For each day the date is selected once, the entries already on Quidlo
+    are read back, and a diff plan (delete/update/insert/skip) is computed
+    and executed in that order - no reselecting the date between operations
+    on the same day, and no confirmation step between days.
+    """
+    sorted_entries = sort_entries_for_submission(entries)
+    status = on_status or _default_on_status
+    results: list[DaySyncResult] = []
+
+    try:
+        async with async_playwright() as playwright:
+            context = await playwright.chromium.launch_persistent_context(
+                user_data_dir=str(PROFILE_DIR),
+                headless=False,
+                viewport={"width": 1400, "height": 1000},
+            )
+            page = context.pages[0] if context.pages else await context.new_page()
+
+            try:
+                await load_tracker(page)
+
+                if await requires_login(page):
+                    status(
+                        "Login required in the opened browser window. "
+                        "Waiting for you to sign in...",
+                    )
+                    await wait_for_login(page)
+                    status("Login detected. Resuming sync...")
+
+                for date_iso, day_entries in group_entries_by_date(sorted_entries):
+                    await select_entry_date(page, date_iso)
+                    existing = await read_day_entries(page, date_iso)
+                    plan = compute_day_diff(date_iso, day_entries, existing)
+                    result = await _execute_day_plan(page, plan, status)
+                    results.append(result)
+                    if on_day_synced is not None:
+                        on_day_synced(result)
+            finally:
+                await context.close()
+    except SyncError:
+        raise
+    except (OSError, PlaywrightError, RuntimeError) as exc:
+        raise AutomationError(str(exc)) from exc
+
+    return results
+
+
+def group_entries_by_date(
+    entries: Sequence[EntryData],
+) -> list[tuple[str, list[EntryData]]]:
+    """Group consecutive same-day entries, assuming `entries` is date-sorted."""
+    groups: list[tuple[str, list[EntryData]]] = []
+    for entry in entries:
+        if groups and groups[-1][0] == entry.date_iso:
+            groups[-1][1].append(entry)
+        else:
+            groups.append((entry.date_iso, [entry]))
+    return groups
+
+
+async def _execute_day_plan(
+    page: Page,
+    plan: DayDiffPlan,
+    status: Callable[[str], None],
+) -> DaySyncResult:
+    for existing in plan.deletes:
+        try:
+            await delete_entry(page, existing)
+        except (OSError, PlaywrightError, RuntimeError) as exc:
+            raise SyncError(plan.date_iso, "delete", existing.entry, exc) from exc
+        status(f"Deleted entry no longer in the calendar: {existing.entry.summary}")
+
+    for existing, target in plan.updates:
+        try:
+            await edit_entry(page, existing, target)
+        except (OSError, PlaywrightError, RuntimeError) as exc:
+            raise SyncError(plan.date_iso, "update", target, exc) from exc
+        status(f"Updated entry: {target.summary}")
+
+    for entry in plan.inserts:
+        try:
+            await fill_and_submit_entry_form(page, entry)
+            await page.wait_for_timeout(1500)
+        except (OSError, PlaywrightError, RuntimeError) as exc:
+            raise SyncError(plan.date_iso, "insert", entry, exc) from exc
+        status(f"Added entry: {entry.summary}")
+
+    return DaySyncResult(
+        date_iso=plan.date_iso,
+        inserted=len(plan.inserts),
+        updated=len(plan.updates),
+        deleted=len(plan.deletes),
+        skipped=len(plan.skips),
+    )
+
+
 async def submit_entry(
     page: Page,
     entry: EntryData,
@@ -99,11 +229,7 @@ async def submit_entry(
     on_accepted: Callable[[], None] | None = None,
 ) -> None:
     await select_entry_date(page, entry.date_iso)
-    await fill_task_description(page, entry.description)
-    await fill_project(page, entry.project)
-    await fill_tags(page, entry.tags)
-    await fill_duration(page, entry.duration)
-    await click_submit(page)
+    await fill_and_submit_entry_form(page, entry)
     # Quidlo has accepted the entry at this point, so mark it submitted
     # before the cancellable settle delay below - otherwise a cancellation
     # during that delay would leave an already-accepted entry staged for
@@ -111,6 +237,14 @@ async def submit_entry(
     if on_accepted is not None:
         on_accepted()
     await page.wait_for_timeout(3000)
+
+
+async def fill_and_submit_entry_form(page: Page, entry: EntryData) -> None:
+    await fill_task_description(page, entry.description)
+    await fill_project(page, entry.project)
+    await fill_tags(page, entry.tags)
+    await fill_duration(page, entry.duration)
+    await click_submit(page)
 
 
 def sort_entries_for_submission(entries: Sequence[EntryData]) -> list[EntryData]:
@@ -288,6 +422,73 @@ async def ensure_active_day(page: Page, day_label: str) -> None:
             f"instead of {day_label!r}."
         )
         raise RuntimeError(message)
+
+
+async def read_day_entries(page: Page, date_iso: str) -> list[ExistingEntry]:
+    # NOTE: the row/field selectors below follow this file's existing Quidlo
+    # class-name conventions but are best-effort guesses, not verified
+    # against the live DOM (see README "Known limitations") - inspect the
+    # real tracker day view and adjust before relying on them for real
+    # edit/delete decisions.
+    rows = page.locator("[class*='DayEntry_row'], [class*='TimeEntry_row']")
+    count = await rows.count()
+    existing: list[ExistingEntry] = []
+    for index in range(count):
+        row = rows.nth(index)
+        project = await _row_field_text(row, "[class*='TimeEntry_project']")
+        description = await _row_field_text(row, "[class*='TimeEntry_title']")
+        duration = await _row_field_text(row, "[class*='TimeEntry_duration']")
+        tags = tuple(
+            tag.strip()
+            for tag in await row.locator("[class*='TimeEntry_tag']").all_inner_texts()
+            if tag.strip()
+        )
+        existing.append(
+            ExistingEntry(
+                entry=EntryData(
+                    date_iso=date_iso,
+                    duration=duration,
+                    description=description,
+                    project=project,
+                    tags=tags,
+                ),
+                ref=row,
+            ),
+        )
+    return existing
+
+
+async def _row_field_text(row: Locator, selector: str) -> str:
+    return (await row.locator(selector).first.inner_text()).strip()
+
+
+async def open_entry_row_menu(row: Locator) -> None:
+    await row.hover()
+    menu_button = row.locator(
+        "[class*='TimeEntry_menuButton'], [class*='TimeEntry_moreButton']",
+    ).first
+    await menu_button.click()
+
+
+async def delete_entry(page: Page, existing: ExistingEntry) -> None:
+    row = cast("Locator", existing.ref)
+    await open_entry_row_menu(row)
+    delete_option = page.get_by_text(re.compile(r"^delete$", re.IGNORECASE)).first
+    await delete_option.click()
+    confirm_button = page.get_by_role(
+        "button",
+        name=re.compile(r"delete", re.IGNORECASE),
+    ).first
+    if await confirm_button.count() > 0:
+        await confirm_button.click()
+    await page.wait_for_timeout(800)
+
+
+async def edit_entry(page: Page, existing: ExistingEntry, target: EntryData) -> None:
+    row = cast("Locator", existing.ref)
+    await row.click()
+    await fill_and_submit_entry_form(page, target)
+    await page.wait_for_timeout(1500)
 
 
 async def fill_task_description(page: Page, description: str) -> None:

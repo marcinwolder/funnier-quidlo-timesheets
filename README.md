@@ -31,7 +31,14 @@ Przy pierwszym uruchomieniu i próbie wysyłki otworzy się okno przeglądarki �
 - **Zakładka From .ics** – import wpisów z pliku `.ics` (z podpowiadaniem nazw plików z katalogu `calendars/`) z opcjonalnym filtrem zakresu dat.
 - **Zakładka Remote calendar** – zapisywanie nazwanych subskrypcji kalendarza (nazwa + URL), wczytywanie ich ponownie oraz import wpisów bezpośrednio ze zdalnego adresu, z tym samym filtrem dat.
 - **Lista wpisów roboczych (staging)** – podgląd wszystkich dodanych/zaimportowanych wpisów z sumą czasu, przed wysyłką.
-- **Wysyłka wsadowa** – jednym przyciskiem/skrótem wysyła wszystkie wpisy z listy do Quidlo przez Playwright; w razie błędu zatrzymuje się na pierwszym nieudanym wpisie. Wysyłkę można w każdej chwili przerwać (przycisk „Cancel” lub `Ctrl+G`) – wpisy już wysłane są usuwane z listy roboczej, reszta zostaje do ponownej wysyłki.
+- **Synchronizacja z Quidlo** – jednym przyciskiem/skrótem („Submit All” / `Ctrl+S`) wpisy z listy są grupowane per dzień i zestawiane ze stanem, który jest już na Quidlo dla tego dnia:
+  - dzień jest wybierany w przeglądarce **raz** na całą grupę wpisów (bez ponownego wybierania daty przy każdym wpisie),
+  - wpisy, które już istnieją i się nie zmieniły, są pomijane (brak duplikatów, np. „5h testowania” dodane drugi raz nic nie robi),
+  - wpisy, które istnieją, ale różnią się czasem trwania lub tagami (albo wygląda na to, że zmienił się tylko tytuł wydarzenia przy tym samym czasie trwania), są edytowane,
+  - wpisy obecne na Quidlo, których nie ma już w bieżącym imporcie kalendarza, są **usuwane** – bez rozróżniania, czy zostały dodane przez ten bot, czy ręcznie w Quidlo,
+  - reszta jest dodawana jako nowe wpisy.
+
+  Operacje w obrębie dnia wykonywane są w kolejności usunięcie → edycja → dodanie, jedna po drugiej, bez ekranu z podglądem/potwierdzeniem planu (żeby nie wydłużać czasu działania). W razie błędu lub przerwania (`Ctrl+G`) z listy roboczej usuwane są tylko wpisy z dni już w pełni zsynchronizowanych – reszta zostaje do ponownej synchronizacji.
 
 ### Skróty klawiszowe w TUI
 
@@ -73,5 +80,6 @@ W zakładce **Remote calendar** można zapisać subskrypcję pod nazwą i adrese
 
 ## Znane ograniczenia
 
-- Selektory na stronie Quidlo nie są w pełni zweryfikowane – w razie zmian na stronie automatyzacja może przestać działać.
-- Wysyłka wsadowa zatrzymuje się na pierwszym błędzie i nie wznawia się automatycznie.
+- Selektory na stronie Quidlo nie są w pełni zweryfikowane – w razie zmian na stronie automatyzacja może przestać działać. Dotyczy to szczególnie nowego odczytu listy istniejących wpisów dnia oraz ich edycji/usuwania (`read_day_entries`, `edit_entry`, `delete_entry` w `poc/automation.py`) – te selektory nie zostały jeszcze zweryfikowane względem realnego DOM-u Quidlo i wymagają dostosowania po inspekcji strony.
+- Synchronizacja usuwa z Quidlo każdy wpis danego dnia, którego nie ma w bieżącym imporcie kalendarza – niezależnie od tego, czy powstał przez ten bot, czy został dodany ręcznie wprost w Quidlo. To świadoma decyzja (prostota ponad śledzenie pochodzenia wpisów), ale oznacza, że ręcznie dodane wpisy bez odpowiednika w kalendarzu zostaną usunięte.
+- Synchronizacja zatrzymuje się na pierwszym błędzie i nie wznawia się automatycznie; dni już w pełni zsynchronizowane nie są jednak powtarzane przy ponownej próbie.
