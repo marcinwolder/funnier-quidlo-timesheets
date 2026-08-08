@@ -23,8 +23,17 @@ from textual.widgets import (
     TabPane,
 )
 
-from cli.ics_parser import parse_ics, parse_ics_bytes
-from cli.remote_calendars import (
+from core.automation import (
+    AutomationError,
+    DaySyncResult,
+    SyncError,
+    sort_entries_for_submission,
+    sync_entries,
+)
+from core.calendar_import import parse_ics, parse_ics_bytes
+from core.duration import format_duration_minutes, parse_duration_minutes
+from core.models import EntryData
+from core.remote_calendars import (
     RemoteCalendar,
     fetch_remote_calendar,
     get_remote_calendar,
@@ -32,15 +41,6 @@ from cli.remote_calendars import (
     remote_calendar_names,
     save_remote_calendar,
 )
-from poc.automation import (
-    AutomationError,
-    DaySyncResult,
-    SyncError,
-    sort_entries_for_submission,
-    sync_entries,
-)
-from poc.duration import format_duration_minutes, parse_duration_minutes
-from poc.models import EntryData
 
 if TYPE_CHECKING:
     from textual.worker import Worker

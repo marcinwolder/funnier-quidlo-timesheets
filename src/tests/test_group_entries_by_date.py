@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from poc.automation import group_entries_by_date
-from poc.models import EntryData
+from core.automation import group_entries_by_date
+from core.models import EntryData
 
 
 def make_entry(date_iso: str, description: str) -> EntryData:

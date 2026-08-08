@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from poc.duration import format_duration_minutes, parse_duration_minutes
+from core.duration import format_duration_minutes, parse_duration_minutes
 
 
 @pytest.mark.parametrize(

@@ -78,8 +78,14 @@ W zakładce **Remote calendar** można zapisać subskrypcję pod nazwą i adrese
 - `webcal://` / `webcals://` – automatycznie zamieniane na `https://`
 - link z ustawień kalendarza Google zawierający `cid=...` – automatycznie zamieniany na publiczny link `.ics`
 
+## Struktura projektu
+
+- `core/` – logika niezależna od UI: model domenowy (`models.py`), parsowanie kalendarza (`calendar_import.py`), zdalne subskrypcje (`remote_calendars.py`), silnik diff (`day_sync.py`) oraz automatyzacja Playwright podzielona wg odpowiedzialności: `browser_session.py` (logowanie/tracker), `date_navigation.py` (wybór dnia w kalendarzu), `entry_form.py` (wypełnianie formularza wpisu), `day_entries.py` (odczyt/edycja/usuwanie istniejących wpisów dnia), `automation.py` (orkiestracja: `submit_entries`, `sync_entries`).
+- `cli/` – wyłącznie warstwa UI: aplikacja Textual (`TimeTrackerApp`).
+- `tests/` – testy jednostkowe logiki z `core/` (bez Playwrighta).
+
 ## Znane ograniczenia
 
-- Selektory na stronie Quidlo nie są w pełni zweryfikowane – w razie zmian na stronie automatyzacja może przestać działać. Dotyczy to szczególnie nowego odczytu listy istniejących wpisów dnia oraz ich edycji/usuwania (`read_day_entries`, `edit_entry`, `delete_entry` w `poc/automation.py`) – te selektory nie zostały jeszcze zweryfikowane względem realnego DOM-u Quidlo i wymagają dostosowania po inspekcji strony.
+- Selektory na stronie Quidlo nie są w pełni zweryfikowane – w razie zmian na stronie automatyzacja może przestać działać. Dotyczy to szczególnie nowego odczytu listy istniejących wpisów dnia oraz ich edycji/usuwania (`read_day_entries`, `edit_entry`, `delete_entry` w `core/day_entries.py`) – te selektory nie zostały jeszcze zweryfikowane względem realnego DOM-u Quidlo i wymagają dostosowania po inspekcji strony.
 - Synchronizacja usuwa z Quidlo każdy wpis danego dnia, którego nie ma w bieżącym imporcie kalendarza – niezależnie od tego, czy powstał przez ten bot, czy został dodany ręcznie wprost w Quidlo. To świadoma decyzja (prostota ponad śledzenie pochodzenia wpisów), ale oznacza, że ręcznie dodane wpisy bez odpowiednika w kalendarzu zostaną usunięte.
 - Synchronizacja zatrzymuje się na pierwszym błędzie i nie wznawia się automatycznie; dni już w pełni zsynchronizowane nie są jednak powtarzane przy ponownej próbie.

@@ -3,12 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeVar
 
-from poc.duration import parse_duration_minutes
+from core.duration import parse_duration_minutes
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
-    from poc.models import EntryData
+    from core.models import EntryData
 
 _T = TypeVar("_T")
 _K = TypeVar("_K")

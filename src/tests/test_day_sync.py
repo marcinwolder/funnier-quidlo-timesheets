@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from poc.day_sync import ExistingEntry, compute_day_diff
-from poc.models import EntryData
+from core.day_sync import ExistingEntry, compute_day_diff
+from core.models import EntryData
 
 DATE_ISO = "2026-08-10"
 

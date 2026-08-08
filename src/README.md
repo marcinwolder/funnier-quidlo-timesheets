@@ -1,9 +1,13 @@
 # Time Tracker
 
-This repository now has two entrypoints:
+`python -m cli` runs the app: a Textual TUI that stages multiple entries before
+syncing them with Quidlo.
 
-- `python -m poc` for the original single-entry Playwright proof of concept
-- `python -m cli` for MVP1, a Textual TUI that stages multiple entries before batch submission
+The code is split into two packages:
+
+- `core/` - domain model, calendar parsing, remote calendar subscriptions, the
+  day diff engine, and the Playwright automation. No dependency on Textual.
+- `cli/` - the Textual TUI itself (`TimeTrackerApp`), the only UI layer.
 
 ## CLI MVP1
 
@@ -33,9 +37,9 @@ The automation currently:
 - reuses a persistent Chromium profile in `src/.playwright-profile`
 - waits for manual login if needed
 - groups staged entries by day and syncs each day in one pass:
-  - selects the day's date once (not once per entry)
-  - reads back the entries already on Quidlo for that day
-  - diffs them against the staged calendar entries (see `poc/day_sync.py`)
+  - selects the day's date once (not once per entry), via `core/date_navigation.py`
+  - reads back the entries already on Quidlo for that day, via `core/day_entries.py`
+  - diffs them against the staged calendar entries (see `core/day_sync.py`)
     and inserts new ones, updates ones whose duration/tags/title changed,
     deletes ones no longer present in the calendar, and skips unchanged ones
   - runs delete -> update -> insert for the day, then moves to the next day,
@@ -44,7 +48,7 @@ The automation currently:
 ## Notes
 
 - The live page selectors have not been fully verified yet, especially the
-  new day-entry read/edit/delete selectors in `poc/automation.py`
+  new day-entry read/edit/delete selectors in `core/day_entries.py`
   (`read_day_entries`, `edit_entry`, `delete_entry`) - inspect the real
   tracker day view and adjust them before relying on this for real data.
 - Deletion has no notion of "added by this bot" - any Quidlo entry for a

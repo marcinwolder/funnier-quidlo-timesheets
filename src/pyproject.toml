@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "src"
 version = "0.1.0"
-description = "POC for submitting a Quidlo Timesheets entry with Playwright"
+description = "Calendar-to-Quidlo Timesheets sync, driven by a Textual TUI and Playwright"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
@@ -17,13 +17,12 @@ dependencies = [
 
 [project.scripts]
 cli = "cli.__main__:main"
-poc = "poc.__main__:main"
 
 [project.optional-dependencies]
 dev = ["pyright>=1.1.410", "pytest>=8.0", "ruff>=0.15.17"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["cli", "poc"]
+packages = ["cli", "core"]
 
 [tool.ruff.lint]
 select = ["ALL"]
