@@ -31,7 +31,15 @@ Przy pierwszym uruchomieniu i próbie wysyłki otworzy się okno przeglądarki �
 - **Zakładka From .ics** – import wpisów z pliku `.ics` (z podpowiadaniem nazw plików z katalogu `calendars/`) z opcjonalnym filtrem zakresu dat.
 - **Zakładka Remote calendar** – zapisywanie nazwanych subskrypcji kalendarza (nazwa + URL), wczytywanie ich ponownie oraz import wpisów bezpośrednio ze zdalnego adresu, z tym samym filtrem dat.
 - **Lista wpisów roboczych (staging)** – podgląd wszystkich dodanych/zaimportowanych wpisów z sumą czasu, przed wysyłką.
-- **Wysyłka wsadowa** – jednym przyciskiem/skrótem wysyła wszystkie wpisy z listy do Quidlo przez Playwright; w razie błędu zatrzymuje się na pierwszym nieudanym wpisie. Wysyłkę można w każdej chwili przerwać (przycisk „Cancel” lub `Ctrl+G`) – wpisy już wysłane są usuwane z listy roboczej, reszta zostaje do ponownej wysyłki.
+- **Synchronizacja z Quidlo** – jednym przyciskiem/skrótem („Submit All” / `Ctrl+S`) wpisy z listy są grupowane per dzień i zestawiane ze stanem, który jest już na Quidlo dla tego dnia:
+  - dzień jest wybierany w przeglądarce **raz** na całą grupę wpisów (bez ponownego wybierania daty przy każdym wpisie); stan dnia jest odczytywany z tej samej odpowiedzi API (`tasks/grouped-by-projects`), którą Quidlo i tak pobiera przy zmianie aktywnego dnia – nie skrapujemy tagów/czasu z renderowanego DOM, więc dane (w tym tagi) są dokładne,
+  - wpisy, które już istnieją i się nie zmieniły, są pomijane (brak duplikatów, np. „5h testowania” dodane drugi raz nic nie robi),
+  - wpisy, które istnieją, ale różnią się czasem trwania lub tagami (albo wygląda na to, że zmienił się tylko tytuł wydarzenia przy tym samym czasie trwania), są edytowane,
+  - wpisy obecne na Quidlo, których nie ma już w bieżącym imporcie kalendarza, są **usuwane** – bez rozróżniania, czy zostały dodane przez ten bot, czy ręcznie w Quidlo,
+  - reszta jest dodawana jako nowe wpisy.
+  - synchronizacji podlega **każdy dzień z zaimportowanego zakresu dat**, nie tylko dni, które akurat mają jakiś wpis – jeśli usunięto z kalendarza jedyne wydarzenie danego dnia (a dzień wciąż jest w zakresie importu From .ics / Remote calendar), ten dzień i tak zostanie odwiedzony i wszystko, co jest na nim w Quidlo, zostanie usunięte. Zakres jest pamiętany jako zbiór konkretnych dat (nie jeden przedział min-max), więc dwa niezależne importy (np. 1 i 31 stycznia) nie zamieniają się w jeden ciągły zakres zamiatający też nieimportowane dni pomiędzy nimi; dni już zsynchronizowane w danym przebiegu są z tego zbioru usuwane na bieżąco, więc ponowna próba po przerwaniu/błędzie nie zamiecie (i nie usunie) dnia, który chwilę wcześniej poprawnie zsynchronizowano.
+
+  Operacje w obrębie dnia wykonywane są w kolejności usunięcie → edycja → dodanie, jedna po drugiej, bez ekranu z podglądem/potwierdzeniem planu (żeby nie wydłużać czasu działania). W razie błędu lub przerwania (`Ctrl+G`) z listy roboczej usuwane są tylko wpisy z dni już w pełni zsynchronizowanych – reszta zostaje do ponownej synchronizacji.
 
 ### Skróty klawiszowe w TUI
 
@@ -71,7 +79,16 @@ W zakładce **Remote calendar** można zapisać subskrypcję pod nazwą i adrese
 - `webcal://` / `webcals://` – automatycznie zamieniane na `https://`
 - link z ustawień kalendarza Google zawierający `cid=...` – automatycznie zamieniany na publiczny link `.ics`
 
+## Struktura projektu
+
+- `core/` – logika niezależna od UI: model domenowy (`models.py`), parsowanie kalendarza (`calendar_import.py`), zdalne subskrypcje (`remote_calendars.py`), silnik diff (`day_sync.py`) oraz automatyzacja Playwright podzielona wg odpowiedzialności: `browser_session.py` (logowanie/tracker), `date_navigation.py` (wybór dnia w kalendarzu), `entry_form.py` (wypełnianie formularza wpisu), `day_entries.py` (odczyt/edycja/usuwanie istniejących wpisów dnia), `automation.py` (orkiestracja: `submit_entries`, `sync_entries`).
+- `cli/` – wyłącznie warstwa UI: aplikacja Textual (`TimeTrackerApp`).
+- `tests/` – testy jednostkowe logiki z `core/` (bez Playwrighta).
+
 ## Znane ograniczenia
 
-- Selektory na stronie Quidlo nie są w pełni zweryfikowane – w razie zmian na stronie automatyzacja może przestać działać.
-- Wysyłka wsadowa zatrzymuje się na pierwszym błędzie i nie wznawia się automatycznie.
+- Selektory na stronie Quidlo nie są w pełni zweryfikowane – w razie zmian na stronie automatyzacja może przestać działać. Odczyt istniejących wpisów dnia (`select_day_and_read_entries` w `core/day_entries.py`) opiera się na odpowiedzi API `tasks/grouped-by-projects`, więc dane wejściowe są solidne; DOM jest używany tylko do namierzenia wiersza pod klik `Edit task`/`Delete task`.
+- `Edit task` otwiera osobny modal (nie ten sam formularz co przy dodawaniu nowego wpisu) – edycja opisu, czasu trwania i tagów jest zaimplementowana względem realnej struktury tego modala (potwierdzone: kliknięcie pola tagów otwiera tę samą rozwijaną listę co przy dodawaniu, a kliknięcie już zaznaczonej pozycji ją odznacza, więc stare tagi są czyszczone przed zaznaczeniem nowych). **Projekt nie jest tam edytowany** – to pole single-select z już wypełnioną wartością, a sposobu jego bezpiecznej zmiany nie potwierdziłem. Jeśli wykryta zmiana wymagałaby zmiany projektu (rzadki przypadek „zmiana tytułu” z drugiego przebiegu dopasowania), silnik diff zamienia to na usunięcie starego wpisu + dodanie nowego, zamiast próbować edytować projekt w miejscu.
+- `Delete task` otwiera modal potwierdzenia (ta sama struktura co modal edycji, zwykłe `<div>` bez roli ARIA jako przyciski „Cancel”/„Delete”) – potwierdzone na żywo i zaimplementowane względem realnej struktury tego modala.
+- Synchronizacja usuwa z Quidlo każdy wpis danego dnia, którego nie ma w bieżącym imporcie kalendarza – niezależnie od tego, czy powstał przez ten bot, czy został dodany ręcznie wprost w Quidlo. To świadoma decyzja (prostota ponad śledzenie pochodzenia wpisów), ale oznacza, że ręcznie dodane wpisy bez odpowiednika w kalendarzu zostaną usunięte.
+- Synchronizacja zatrzymuje się na pierwszym błędzie i nie wznawia się automatycznie; dni już w pełni zsynchronizowane nie są jednak powtarzane przy ponownej próbie.

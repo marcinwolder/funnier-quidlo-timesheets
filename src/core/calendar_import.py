@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple, cast
 import recurring_ical_events  # pyright: ignore[reportMissingTypeStubs]
 from icalendar import Calendar
 
-from poc.models import EntryData
+from core.models import EntryData
 
 if TYPE_CHECKING:
     from icalendar.cal import Component
