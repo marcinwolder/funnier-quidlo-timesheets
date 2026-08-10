@@ -62,11 +62,14 @@ The automation currently:
   (confirmed live), showing the full untruncated option list, and clicking
   an already-checked option unchecks it - so the old tag selection is
   cleared before the new one is picked. Project is deliberately left
-  untouched: it's a single-select autocomplete with an existing value and
-  no confirmed way to clear/replace it, unlike the tags checkbox toggle. A
-  project-only change (only possible via the rename-detection path, since
-  project is part of the identity key otherwise) keeps being detected and
-  safely retried (a no-op save) rather than risking a wrong replacement.
+  untouched in the modal: it's a single-select autocomplete with an
+  existing value and no confirmed way to clear/replace it, unlike the tags
+  checkbox toggle. Instead, day_sync.compute_day_diff routes a
+  duration-matched pair whose project differs (only possible via the
+  rename-detection pass, since project is part of the identity key
+  otherwise) to a delete+insert instead of an update, so a project change
+  is still applied - just by replacing the entry wholesale rather than
+  editing it in place.
 - `Delete task` is still unverified: whether it asks for confirmation, and
   if so what that dialog looks like. The current confirmation-button lookup
   uses `get_by_role("button", ...)`, which almost certainly never matches

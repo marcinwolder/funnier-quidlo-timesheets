@@ -55,7 +55,10 @@ def compute_day_diff(
        overwrites every field with the calendar's values, which orphan gets
        paired with which inside an ambiguous bucket doesn't matter: the
        resulting set of Quidlo entries converges to the same state either
-       way.
+       way. A pair whose project also differs becomes a delete+insert
+       instead of an update: editing a task's project field in place isn't
+       supported (unlike description/duration/tags), so the same-project
+       case is edited while the different-project case is replaced wholesale.
 
     Anything still unmatched is a plain insert (calendar-only) or delete
     (Quidlo-only, regardless of who created it originally).
@@ -111,7 +114,13 @@ def compute_day_diff(
         existing_group = existing_by_duration.get(key, [])
         paired = min(len(cal_group), len(existing_group))
         # Arbitrary pairing within a duration bucket is safe: see docstring.
-        updates.extend(zip(existing_group[:paired], cal_group[:paired]))
+        for i in range(paired):
+            existing_entry, target = existing_group[i], cal_group[i]
+            if existing_entry.entry.project == target.project:
+                updates.append((existing_entry, target))
+            else:
+                deletes.append(existing_entry)
+                inserts.append(target)
         inserts.extend(cal_group[paired:])
         deletes.extend(existing_group[paired:])
 

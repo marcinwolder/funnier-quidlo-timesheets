@@ -112,6 +112,22 @@ def test_detects_rename_via_unique_duration_match() -> None:
     assert not plan.deletes
 
 
+def test_duration_bucket_pair_with_different_project_becomes_replace() -> None:
+    # Editing a task's project in place isn't supported, so a duration-bucket
+    # match (title rename) whose project also differs is replaced wholesale
+    # instead of edited - unlike a rename that keeps the same project.
+    cal_entry = make_entry(project="B", description="New Title", duration="2h")
+    existing = make_existing(
+        make_entry(project="A", description="Old Title", duration="2h"),
+    )
+
+    plan = compute_day_diff(DATE_ISO, [cal_entry], [existing])
+
+    assert not plan.updates
+    assert plan.inserts == (cal_entry,)
+    assert plan.deletes == (existing,)
+
+
 def test_ambiguous_duration_bucket_pairs_all_as_updates() -> None:
     cal1 = make_entry(project="A", description="Task1-new", duration="3h")
     cal2 = make_entry(project="B", description="Task2-new", duration="3h")
