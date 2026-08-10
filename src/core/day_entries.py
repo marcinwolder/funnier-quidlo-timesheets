@@ -6,7 +6,11 @@ from typing import TYPE_CHECKING, cast
 from core.date_navigation import select_entry_date
 from core.day_sync import ExistingEntry
 from core.duration import format_duration_minutes
-from core.entry_form import fill_text_input
+from core.entry_form import (
+    click_autocomplete_option,
+    fill_text_input,
+    wait_for_selected_tag,
+)
 from core.models import EntryData
 
 if TYPE_CHECKING:
@@ -122,15 +126,27 @@ async def edit_entry(page: Page, existing: ExistingEntry, target: EntryData) -> 
     )
     await fill_text_input(duration_input, target.duration)
 
-    # NOT touched here: project and tags. Both are autocomplete widgets that
-    # already have a selection (project a single value, tags multiple chips
-    # truncated to "first tag + N" just like the list view) - clearing an
-    # existing selection is unconfirmed, and getting it wrong risks ending up
-    # with a mix of old and new values rather than a clean replacement.
+    # Confirmed live: clicking the tags field opens the same checkbox-style
+    # dropdown used when creating an entry, showing the full (untruncated)
+    # option list with existing selections marked Autocomplete_checked, and
+    # clicking an already-checked option unchecks it. So the old selection
+    # can be cleared before picking the new one, unlike project below.
+    tags_input = (
+        modal.locator("[class*='EditTask_row__']")
+        .filter(has_text="Tags")
+        .locator("input")
+        .first
+    )
+    await tags_input.click()
+    await _replace_selected_tags(page, target.tags)
+
+    # NOT touched here: project. It's a single-select autocomplete that
+    # already has a value, and clearing/replacing a single-select selection
+    # hasn't been confirmed the way the tags checkbox-toggle behavior has.
     # Project never differs for the common (project, description)
-    # identity-matched update path; a tag-only or rename-triggered project
-    # change will keep being detected and safely retried (a no-op save)
-    # until this is filled in.
+    # identity-matched update path anyway; a rename-triggered project change
+    # will keep being detected and safely retried (a no-op save) until this
+    # is filled in.
     save_button = (
         modal.locator("[class*='Button_button__']")
         .filter(has_text=re.compile(r"^Save$"))
@@ -138,3 +154,22 @@ async def edit_entry(page: Page, existing: ExistingEntry, target: EntryData) -> 
     )
     await save_button.click()
     await page.wait_for_timeout(1500)
+
+
+async def _replace_selected_tags(page: Page, tags: tuple[str, ...]) -> None:
+    checked = page.locator(
+        "[class*='Autocomplete_optionsContainer'] [class*='Autocomplete_checked']",
+    )
+    max_uncheck_attempts = 50
+    for _ in range(max_uncheck_attempts):
+        if await checked.count() == 0:
+            break
+        await checked.first.click()
+        await page.wait_for_timeout(200)
+    else:
+        message = "Could not clear all existing tags before re-selecting new ones."
+        raise RuntimeError(message)
+
+    for tag in tags:
+        await click_autocomplete_option(page, tag)
+        await wait_for_selected_tag(page, tag)

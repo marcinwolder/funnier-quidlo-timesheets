@@ -57,12 +57,16 @@ The automation currently:
   edit/delete.
 - `Edit task` opens a separate modal, not the create-entry form - confirmed
   against a captured modal and implemented against its real fields.
-  Description and duration are updated there; project and tags are
-  deliberately left untouched (both are autocomplete widgets with an
-  existing selection/chips and no confirmed way to clear them first, and
-  tags face the same "+N" truncation in the modal as in the list view) - a
-  project- or tag-only change keeps being detected and safely retried
-  (a no-op save) rather than risking a mixed old+new result.
+  Description, duration, and tags are updated there: clicking the tags
+  field opens the same checkbox-style dropdown used when creating an entry
+  (confirmed live), showing the full untruncated option list, and clicking
+  an already-checked option unchecks it - so the old tag selection is
+  cleared before the new one is picked. Project is deliberately left
+  untouched: it's a single-select autocomplete with an existing value and
+  no confirmed way to clear/replace it, unlike the tags checkbox toggle. A
+  project-only change (only possible via the rename-detection path, since
+  project is part of the identity key otherwise) keeps being detected and
+  safely retried (a no-op save) rather than risking a wrong replacement.
 - `Delete task` is still unverified: whether it asks for confirmation, and
   if so what that dialog looks like. The current confirmation-button lookup
   uses `get_by_role("button", ...)`, which almost certainly never matches
