@@ -77,12 +77,9 @@ The automation currently:
   otherwise) to a delete+insert instead of an update, so a project change
   is still applied - just by replacing the entry wholesale rather than
   editing it in place.
-- `Delete task` is still unverified: whether it asks for confirmation, and
-  if so what that dialog looks like. The current confirmation-button lookup
-  uses `get_by_role("button", ...)`, which almost certainly never matches
-  anything, since Quidlo's own buttons (see the Edit modal's Cancel/Save)
-  are plain divs with no ARIA role. Watch a real delete before trusting it
-  on real data.
+- `Delete task` opens a confirmation modal (same Modal_card structure as
+  the Edit modal, plain divs with no ARIA role for "Cancel"/"Delete") -
+  confirmed live and implemented against its real fields.
 - Deletion has no notion of "added by this bot" - any Quidlo entry for a
   synced day that has no calendar counterpart is deleted, including entries
   added manually straight in Quidlo.

@@ -85,15 +85,23 @@ async def _entries_from_payload(
 # almost certainly never matches anything here and silently does nothing.
 # Watch a real delete before trusting this on real data.
 async def delete_entry(page: Page, existing: ExistingEntry) -> None:
+    # Confirmed against a captured "Delete task" confirmation modal: it's
+    # the same Modal_card overlay as the Edit modal, with plain
+    # Button_button__ divs (no ARIA role) for "Cancel"/"Delete" - the
+    # previous get_by_role("button", ...) lookup could never match either
+    # one, so the confirmation was silently skipped.
     row = cast("Locator", existing.ref)
     await row.hover()
     await row.locator("a[title='Delete task']").first.click()
-    confirm_button = page.get_by_role(
-        "button",
-        name=re.compile(r"delete", re.IGNORECASE),
-    ).first
-    if await confirm_button.count() > 0:
-        await confirm_button.click()
+
+    modal = page.locator("[class*='Modal_card__']")
+    await modal.wait_for(state="visible", timeout=5000)
+    confirm_button = (
+        modal.locator("[class*='Button_button__']")
+        .filter(has_text=re.compile(r"^Delete$"))
+        .first
+    )
+    await confirm_button.click()
     await page.wait_for_timeout(800)
 
 
