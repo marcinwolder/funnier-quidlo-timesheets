@@ -188,6 +188,10 @@ class TimeTrackerApp(App[None]):
         self.remote_calendars: list[RemoteCalendar] = []
         self.selected_index: int | None = None
         self._submission_worker: Worker[None] | None = None
+        # Union of all imported date ranges since the last sync/clear - lets
+        # sync_entries visit a day even if its only calendar entry was
+        # removed, so a now-stale Quidlo entry there still gets deleted.
+        self.staged_date_range: tuple[date, date] | None = None
 
     @staticmethod
     def local_today() -> date:
@@ -307,6 +311,7 @@ class TimeTrackerApp(App[None]):
             self.push_screen(InfoScreen(f"Failed to import .ics:\n{exc}"))
             return
 
+        self.extend_staged_date_range(start, end)
         self.stage_imported_entries(
             entries,
             empty_message=(
@@ -382,6 +387,7 @@ class TimeTrackerApp(App[None]):
             self.push_screen(InfoScreen(f"Failed to import remote calendar:\n{exc}"))
             return
 
+        self.extend_staged_date_range(start, end)
         self.stage_imported_entries(
             entries,
             empty_message=(
@@ -449,6 +455,7 @@ class TimeTrackerApp(App[None]):
 
         removed_count = len(self.entries)
         self.entries.clear()
+        self.staged_date_range = None
         self.selected_index = None
         self.refresh_entry_list()
         self.set_status(f"Deleted all staged entries ({removed_count}).")
@@ -500,6 +507,7 @@ class TimeTrackerApp(App[None]):
                 self.entries,
                 on_status=self.set_status,
                 on_day_synced=handle_day_synced,
+                sweep_range=self.staged_date_range,
             )
         except asyncio.CancelledError:
             remove_processed_days()
@@ -524,6 +532,7 @@ class TimeTrackerApp(App[None]):
             self.set_submitting_state(submitting=False)
 
         self.entries.clear()
+        self.staged_date_range = None
         self.selected_index = None
         self.refresh_entry_list()
         self.set_status(f"Synced {submitted_total} staged entries.")
@@ -748,6 +757,15 @@ class TimeTrackerApp(App[None]):
         start = date.fromisoformat(start_str) if start_str else None
         end = date.fromisoformat(end_str) if end_str else None
         return start, end
+
+    def extend_staged_date_range(self, start: date | None, end: date | None) -> None:
+        if start is None or end is None:
+            return
+        if self.staged_date_range is None:
+            self.staged_date_range = (start, end)
+            return
+        current_start, current_end = self.staged_date_range
+        self.staged_date_range = (min(current_start, start), max(current_end, end))
 
     def stage_imported_entries(
         self,

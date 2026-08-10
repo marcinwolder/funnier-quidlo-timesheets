@@ -37,6 +37,7 @@ Przy pierwszym uruchomieniu i próbie wysyłki otworzy się okno przeglądarki �
   - wpisy, które istnieją, ale różnią się czasem trwania lub tagami (albo wygląda na to, że zmienił się tylko tytuł wydarzenia przy tym samym czasie trwania), są edytowane,
   - wpisy obecne na Quidlo, których nie ma już w bieżącym imporcie kalendarza, są **usuwane** – bez rozróżniania, czy zostały dodane przez ten bot, czy ręcznie w Quidlo,
   - reszta jest dodawana jako nowe wpisy.
+  - synchronizacji podlega **cały zaimportowany zakres dat**, nie tylko dni, które akurat mają jakiś wpis – jeśli usunięto z kalendarza jedyne wydarzenie danego dnia (a dzień wciąż jest w zakresie importu From .ics / Remote calendar), ten dzień i tak zostanie odwiedzony i wszystko, co jest na nim w Quidlo, zostanie usunięte.
 
   Operacje w obrębie dnia wykonywane są w kolejności usunięcie → edycja → dodanie, jedna po drugiej, bez ekranu z podglądem/potwierdzeniem planu (żeby nie wydłużać czasu działania). W razie błędu lub przerwania (`Ctrl+G`) z listy roboczej usuwane są tylko wpisy z dni już w pełni zsynchronizowanych – reszta zostaje do ponownej synchronizacji.
 

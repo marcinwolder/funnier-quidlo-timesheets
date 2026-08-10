@@ -47,6 +47,13 @@ The automation currently:
     deletes ones no longer present in the calendar, and skips unchanged ones
   - runs delete -> update -> insert for the day, then moves to the next day,
     with no confirmation step in between
+  - the day-groups swept (`core/automation.py`'s `build_day_groups`) cover
+    the full union of every imported date range (tracked by the TUI as
+    `staged_date_range`, extended on each `.ics`/remote import and reset
+    after a full sync or "Delete All"), not just days that ended up with a
+    staged entry - otherwise a day whose only calendar entry got removed
+    would never be visited, so a now-stale Quidlo entry there would never
+    be detected and deleted
 
 ## Notes
 

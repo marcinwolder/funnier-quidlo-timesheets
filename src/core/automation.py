@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -130,6 +130,7 @@ async def sync_entries(
     *,
     on_status: Callable[[str], None] | None = None,
     on_day_synced: Callable[[DaySyncResult], None] | None = None,
+    sweep_range: tuple[date, date] | None = None,
 ) -> list[DaySyncResult]:
     """Reconcile staged entries against Quidlo, one calendar day at a time.
 
@@ -137,6 +138,11 @@ async def sync_entries(
     are read back, and a diff plan (delete/update/insert/skip) is computed
     and executed in that order - no reselecting the date between operations
     on the same day, and no confirmation step between days.
+
+    `sweep_range` (inclusive) forces every day in that span to be visited
+    even if it has no staged entries - otherwise a day whose only calendar
+    entry was removed would never be checked, so a now-stale Quidlo entry
+    for that day would never be found and deleted.
     """
     sorted_entries = sort_entries_for_submission(entries)
     status = on_status or _default_on_status
@@ -162,7 +168,10 @@ async def sync_entries(
                     await wait_for_login(page)
                     status("Login detected. Resuming sync...")
 
-                for date_iso, day_entries in group_entries_by_date(sorted_entries):
+                for date_iso, day_entries in build_day_groups(
+                    sorted_entries,
+                    sweep_range,
+                ):
                     existing = await select_day_and_read_entries(page, date_iso)
                     status(
                         f"Found {len(existing)} existing entr"
@@ -183,17 +192,27 @@ async def sync_entries(
     return results
 
 
-def group_entries_by_date(
+def build_day_groups(
     entries: Sequence[EntryData],
+    sweep_range: tuple[date, date] | None = None,
 ) -> list[tuple[str, list[EntryData]]]:
-    """Group consecutive same-day entries, assuming `entries` is date-sorted."""
-    groups: list[tuple[str, list[EntryData]]] = []
+    """Group entries by day, plus every day in `sweep_range` with no entries."""
+    entries_by_date: dict[str, list[EntryData]] = {}
     for entry in entries:
-        if groups and groups[-1][0] == entry.date_iso:
-            groups[-1][1].append(entry)
-        else:
-            groups.append((entry.date_iso, [entry]))
-    return groups
+        entries_by_date.setdefault(entry.date_iso, []).append(entry)
+
+    all_dates = set(entries_by_date)
+    if sweep_range is not None:
+        start, end = sweep_range
+        current = start
+        while current <= end:
+            all_dates.add(current.isoformat())
+            current += timedelta(days=1)
+
+    return [
+        (date_iso, entries_by_date.get(date_iso, []))
+        for date_iso in sorted(all_dates)
+    ]
 
 
 async def _execute_day_plan(
