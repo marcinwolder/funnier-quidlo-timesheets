@@ -28,6 +28,13 @@ async def read_day_entries(page: Page, date_iso: str) -> list[ExistingEntry]:
             row = rows.nth(row_index)
             description = await _locator_text(row, "[class*='Text_text__']")
             duration = await _locator_text(row, "[class*='ListCell_last__']")
+            # KNOWN LIMITATION: when a row has more than one tag, Quidlo's
+            # list view appears to truncate the display to the first tag
+            # plus a "+N" indicator rather than rendering a Tag_text chip per
+            # tag, so this can undercount tags for multi-tag entries. That
+            # only risks a spurious (harmless) update - _needs_update in
+            # day_sync.py always writes the calendar's own tags, never the
+            # possibly-undercounted ones read here.
             tags = tuple(
                 tag.strip()
                 for tag in await row.locator("[class*='Tag_text__']").all_inner_texts()
@@ -52,14 +59,15 @@ async def _locator_text(scope: Locator, selector: str) -> str:
     return (await scope.locator(selector).first.inner_text()).strip()
 
 
-# NOTE: the row-level "Delete task"/"Edit task" links below are confirmed
-# against the live DOM. What happens after clicking them is not: whether
-# "Edit task" opens the same create-entry form fields fill_and_submit_entry_form
-# targets, and whether "Delete task" deletes immediately or opens a
-# confirmation dialog. Watch a real run before trusting update/delete on
-# real data.
+# NOTE: the row-level "Delete task"/"Edit task" links are hidden until the
+# row is hovered, hence the explicit hover() before clicking. Still
+# unverified: whether "Edit task" opens the same create-entry form fields
+# fill_and_submit_entry_form targets, and whether "Delete task" deletes
+# immediately or opens a confirmation dialog. Watch a real run before
+# trusting update/delete on real data.
 async def delete_entry(page: Page, existing: ExistingEntry) -> None:
     row = cast("Locator", existing.ref)
+    await row.hover()
     await row.locator("a[title='Delete task']").first.click()
     confirm_button = page.get_by_role(
         "button",
@@ -72,6 +80,7 @@ async def delete_entry(page: Page, existing: ExistingEntry) -> None:
 
 async def edit_entry(page: Page, existing: ExistingEntry, target: EntryData) -> None:
     row = cast("Locator", existing.ref)
+    await row.hover()
     await row.locator("a[title='Edit task']").first.click()
     await fill_and_submit_entry_form(page, target)
     await page.wait_for_timeout(1500)
