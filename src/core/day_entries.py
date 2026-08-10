@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, cast
 from core.date_navigation import select_entry_date
 from core.day_sync import ExistingEntry
 from core.duration import format_duration_minutes
-from core.entry_form import fill_and_submit_entry_form
+from core.entry_form import fill_text_input
 from core.models import EntryData
 
 if TYPE_CHECKING:
@@ -73,11 +73,13 @@ async def _entries_from_payload(
 
 
 # NOTE: the row-level "Delete task"/"Edit task" links are hidden until the
-# row is hovered, hence the explicit hover() before clicking. Still
-# unverified: whether "Edit task" opens the same create-entry form fields
-# fill_and_submit_entry_form targets, and whether "Delete task" deletes
-# immediately or opens a confirmation dialog. Watch a real run before
-# trusting update/delete on real data.
+# row is hovered, hence the explicit hover() before clicking. "Delete task"
+# still unverified: whether it deletes immediately or opens a confirmation
+# dialog, and if the latter, what that dialog's buttons actually look like -
+# Quidlo's own buttons are plain divs with no ARIA role (confirmed by the
+# Edit modal's Cancel/Save buttons below), so get_by_role("button", ...)
+# almost certainly never matches anything here and silently does nothing.
+# Watch a real delete before trusting this on real data.
 async def delete_entry(page: Page, existing: ExistingEntry) -> None:
     row = cast("Locator", existing.ref)
     await row.hover()
@@ -92,8 +94,47 @@ async def delete_entry(page: Page, existing: ExistingEntry) -> None:
 
 
 async def edit_entry(page: Page, existing: ExistingEntry, target: EntryData) -> None:
+    # Confirmed against a captured "Edit task" modal: it is a separate
+    # Modal_card overlay, not the create-entry form fill_and_submit_entry_form
+    # targets (none of its inputs have a name attribute at all), which is why
+    # the previous version timed out - it kept clicking the create form's
+    # (now covered-by-the-modal) inputs instead.
     row = cast("Locator", existing.ref)
     await row.hover()
     await row.locator("a[title='Edit task']").first.click()
-    await fill_and_submit_entry_form(page, target)
+
+    modal = page.locator("[class*='Modal_card__']")
+    await modal.wait_for(state="visible", timeout=5000)
+
+    description_input = (
+        modal.locator("[class*='EditTask_row__']")
+        .filter(has_text="Task description")
+        .locator("input")
+        .first
+    )
+    await fill_text_input(description_input, target.description)
+
+    duration_input = (
+        modal.locator("[class*='EditTask_row__']")
+        .filter(has_text="Duration")
+        .locator("input")
+        .first
+    )
+    await fill_text_input(duration_input, target.duration)
+
+    # NOT touched here: project and tags. Both are autocomplete widgets that
+    # already have a selection (project a single value, tags multiple chips
+    # truncated to "first tag + N" just like the list view) - clearing an
+    # existing selection is unconfirmed, and getting it wrong risks ending up
+    # with a mix of old and new values rather than a clean replacement.
+    # Project never differs for the common (project, description)
+    # identity-matched update path; a tag-only or rename-triggered project
+    # change will keep being detected and safely retried (a no-op save)
+    # until this is filled in.
+    save_button = (
+        modal.locator("[class*='Button_button__']")
+        .filter(has_text=re.compile(r"^Save$"))
+        .first
+    )
+    await save_button.click()
     await page.wait_for_timeout(1500)

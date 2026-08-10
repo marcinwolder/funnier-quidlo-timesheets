@@ -54,9 +54,21 @@ The automation currently:
   response rather than scraping the DOM, so the tag-truncation-in-the-list-view
   problem doesn't apply to reads. DOM lookups are still used to find each
   entry's row (matched by project + list order) purely as a click target for
-  edit/delete - the live page selectors for that (and for what `Edit task`
-  actually opens, and whether `Delete task` confirms) have not been fully
-  verified yet.
+  edit/delete.
+- `Edit task` opens a separate modal, not the create-entry form - confirmed
+  against a captured modal and implemented against its real fields.
+  Description and duration are updated there; project and tags are
+  deliberately left untouched (both are autocomplete widgets with an
+  existing selection/chips and no confirmed way to clear them first, and
+  tags face the same "+N" truncation in the modal as in the list view) - a
+  project- or tag-only change keeps being detected and safely retried
+  (a no-op save) rather than risking a mixed old+new result.
+- `Delete task` is still unverified: whether it asks for confirmation, and
+  if so what that dialog looks like. The current confirmation-button lookup
+  uses `get_by_role("button", ...)`, which almost certainly never matches
+  anything, since Quidlo's own buttons (see the Edit modal's Cancel/Save)
+  are plain divs with no ARIA role. Watch a real delete before trusting it
+  on real data.
 - Deletion has no notion of "added by this bot" - any Quidlo entry for a
   synced day that has no calendar counterpart is deleted, including entries
   added manually straight in Quidlo.
