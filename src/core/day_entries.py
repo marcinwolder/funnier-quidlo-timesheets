@@ -3,7 +3,9 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, cast
 
+from core.date_navigation import select_entry_date
 from core.day_sync import ExistingEntry
+from core.duration import format_duration_minutes
 from core.entry_form import fill_and_submit_entry_form
 from core.models import EntryData
 
@@ -11,53 +13,63 @@ if TYPE_CHECKING:
     from playwright.async_api import Locator, Page
 
 
-async def read_day_entries(page: Page, date_iso: str) -> list[ExistingEntry]:
-    # Confirmed against the live Quidlo DOM: entries are grouped into one
-    # section per project (List_list__...), whose header (List_left__...)
-    # holds the project name; individual entries (ListRow_listRow__...) only
-    # carry description/tags/duration, not the project.
+async def select_day_and_read_entries(page: Page, date_iso: str) -> list[ExistingEntry]:
+    # Selecting a day triggers the same tasks/grouped-by-projects request the
+    # app itself uses to render the day's list, confirmed by inspecting the
+    # Network tab. Reading the entries from that JSON response instead of the
+    # rendered DOM gives exact tags/duration - the list view truncates tags
+    # to "first tag + N" for multi-tag entries, with no reliable way to
+    # recover the rest from the DOM alone.
+    async with page.expect_response(
+        lambda response: "grouped-by-projects" in response.url
+        and f"date={date_iso}" in response.url,
+    ) as response_info:
+        await select_entry_date(page, date_iso)
+    response = await response_info.value
+    payload = await response.json()
+    return await _entries_from_payload(page, date_iso, payload)
+
+
+async def _entries_from_payload(
+    page: Page,
+    date_iso: str,
+    payload: dict[str, object],
+) -> list[ExistingEntry]:
+    # DOM rows are still needed as click targets for edit_entry/delete_entry
+    # (no confirmed write API yet), matched to the API's tasks by project
+    # name and list order - the DOM is rendered from this same response, so
+    # row order should match the API's task order within each project.
     existing: list[ExistingEntry] = []
     project_sections = page.locator("[class*='List_list__']")
-    section_count = await project_sections.count()
-    for section_index in range(section_count):
-        section = project_sections.nth(section_index)
-        project = await _locator_text(section, "[class*='List_left__']")
+    projects = cast("list[dict[str, object]]", payload.get("projects", []))
+    for project in projects:
+        project_name = str(project.get("name", ""))
+        section = project_sections.filter(
+            has=page.locator(
+                "[class*='List_left__']",
+                has_text=re.compile(rf"^{re.escape(project_name)}$"),
+            ),
+        ).first
         rows = section.locator("[class*='ListRow_listRow__']")
-        row_count = await rows.count()
-        for row_index in range(row_count):
-            row = rows.nth(row_index)
-            description = await _locator_text(row, "[class*='Text_text__']")
-            duration = await _locator_text(row, "[class*='ListCell_last__']")
-            # KNOWN LIMITATION: when a row has more than one tag, Quidlo's
-            # list view truncates the display to the first tag plus a
-            # "+N" counter (confirmed: the rest render as a Tooltip_wrapper
-            # Counter, not further Tag_text chips), so this can undercount
-            # tags for multi-tag entries. day_sync.py's _needs_update
-            # deliberately ignores tags for exactly this reason - it never
-            # drives an update/skip decision off this possibly-undercounted
-            # value.
-            tags = tuple(
-                tag.strip()
-                for tag in await row.locator("[class*='Tag_text__']").all_inner_texts()
-                if tag.strip()
-            )
+        tasks = cast("list[dict[str, object]]", project.get("tasks", []))
+        for index, task in enumerate(tasks):
+            tag_dicts = cast("list[dict[str, object]]", task.get("tags", []))
+            tags = tuple(str(tag.get("name", "")) for tag in tag_dicts)
             existing.append(
                 ExistingEntry(
                     entry=EntryData(
                         date_iso=date_iso,
-                        duration=duration,
-                        description=description,
-                        project=project,
+                        duration=format_duration_minutes(
+                            cast("int", task["durationMins"]),
+                        ),
+                        description=str(task.get("title", "")),
+                        project=project_name,
                         tags=tags,
                     ),
-                    ref=row,
+                    ref=rows.nth(index),
                 ),
             )
     return existing
-
-
-async def _locator_text(scope: Locator, selector: str) -> str:
-    return (await scope.locator(selector).first.inner_text()).strip()
 
 
 # NOTE: the row-level "Delete task"/"Edit task" links are hidden until the

@@ -32,7 +32,7 @@ Przy pierwszym uruchomieniu i próbie wysyłki otworzy się okno przeglądarki �
 - **Zakładka Remote calendar** – zapisywanie nazwanych subskrypcji kalendarza (nazwa + URL), wczytywanie ich ponownie oraz import wpisów bezpośrednio ze zdalnego adresu, z tym samym filtrem dat.
 - **Lista wpisów roboczych (staging)** – podgląd wszystkich dodanych/zaimportowanych wpisów z sumą czasu, przed wysyłką.
 - **Synchronizacja z Quidlo** – jednym przyciskiem/skrótem („Submit All” / `Ctrl+S`) wpisy z listy są grupowane per dzień i zestawiane ze stanem, który jest już na Quidlo dla tego dnia:
-  - dzień jest wybierany w przeglądarce **raz** na całą grupę wpisów (bez ponownego wybierania daty przy każdym wpisie),
+  - dzień jest wybierany w przeglądarce **raz** na całą grupę wpisów (bez ponownego wybierania daty przy każdym wpisie); stan dnia jest odczytywany z tej samej odpowiedzi API (`tasks/grouped-by-projects`), którą Quidlo i tak pobiera przy zmianie aktywnego dnia – nie skrapujemy tagów/czasu z renderowanego DOM, więc dane (w tym tagi) są dokładne,
   - wpisy, które już istnieją i się nie zmieniły, są pomijane (brak duplikatów, np. „5h testowania” dodane drugi raz nic nie robi),
   - wpisy, które istnieją, ale różnią się czasem trwania lub tagami (albo wygląda na to, że zmienił się tylko tytuł wydarzenia przy tym samym czasie trwania), są edytowane,
   - wpisy obecne na Quidlo, których nie ma już w bieżącym imporcie kalendarza, są **usuwane** – bez rozróżniania, czy zostały dodane przez ten bot, czy ręcznie w Quidlo,
@@ -86,6 +86,6 @@ W zakładce **Remote calendar** można zapisać subskrypcję pod nazwą i adrese
 
 ## Znane ograniczenia
 
-- Selektory na stronie Quidlo nie są w pełni zweryfikowane – w razie zmian na stronie automatyzacja może przestać działać. Dotyczy to szczególnie nowego odczytu listy istniejących wpisów dnia oraz ich edycji/usuwania (`read_day_entries`, `edit_entry`, `delete_entry` w `core/day_entries.py`) – te selektory nie zostały jeszcze zweryfikowane względem realnego DOM-u Quidlo i wymagają dostosowania po inspekcji strony.
+- Selektory na stronie Quidlo nie są w pełni zweryfikowane – w razie zmian na stronie automatyzacja może przestać działać. Odczyt istniejących wpisów dnia (`select_day_and_read_entries` w `core/day_entries.py`) opiera się na odpowiedzi API `tasks/grouped-by-projects`, więc dane wejściowe są solidne; DOM jest używany tylko do namierzenia wiersza pod klik `Edit task`/`Delete task` – to wciąż niezweryfikowane, czy edycja otwiera właściwy formularz i czy usuwanie pyta o potwierdzenie.
 - Synchronizacja usuwa z Quidlo każdy wpis danego dnia, którego nie ma w bieżącym imporcie kalendarza – niezależnie od tego, czy powstał przez ten bot, czy został dodany ręcznie wprost w Quidlo. To świadoma decyzja (prostota ponad śledzenie pochodzenia wpisów), ale oznacza, że ręcznie dodane wpisy bez odpowiednika w kalendarzu zostaną usunięte.
 - Synchronizacja zatrzymuje się na pierwszym błędzie i nie wznawia się automatycznie; dni już w pełni zsynchronizowane nie są jednak powtarzane przy ponownej próbie.

@@ -17,7 +17,7 @@ from core.browser_session import (
     wait_for_login,
 )
 from core.date_navigation import select_entry_date
-from core.day_entries import delete_entry, edit_entry, read_day_entries
+from core.day_entries import delete_entry, edit_entry, select_day_and_read_entries
 from core.day_sync import compute_day_diff
 from core.entry_form import fill_and_submit_entry_form
 
@@ -163,8 +163,7 @@ async def sync_entries(
                     status("Login detected. Resuming sync...")
 
                 for date_iso, day_entries in group_entries_by_date(sorted_entries):
-                    await select_entry_date(page, date_iso)
-                    existing = await read_day_entries(page, date_iso)
+                    existing = await select_day_and_read_entries(page, date_iso)
                     status(
                         f"Found {len(existing)} existing entr"
                         f"{'y' if len(existing) == 1 else 'ies'} for {date_iso}.",

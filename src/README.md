@@ -37,8 +37,11 @@ The automation currently:
 - reuses a persistent Chromium profile in `src/.playwright-profile`
 - waits for manual login if needed
 - groups staged entries by day and syncs each day in one pass:
-  - selects the day's date once (not once per entry), via `core/date_navigation.py`
-  - reads back the entries already on Quidlo for that day, via `core/day_entries.py`
+  - selects the day's date once (not once per entry) via
+    `core/date_navigation.py`, intercepting the same `tasks/grouped-by-projects`
+    API response Quidlo's own frontend fetches on that day-change to read back
+    the entries already there (`select_day_and_read_entries` in
+    `core/day_entries.py`) - exact tags/duration, no DOM scraping for the data
   - diffs them against the staged calendar entries (see `core/day_sync.py`)
     and inserts new ones, updates ones whose duration/tags/title changed,
     deletes ones no longer present in the calendar, and skips unchanged ones
@@ -47,10 +50,13 @@ The automation currently:
 
 ## Notes
 
-- The live page selectors have not been fully verified yet, especially the
-  new day-entry read/edit/delete selectors in `core/day_entries.py`
-  (`read_day_entries`, `edit_entry`, `delete_entry`) - inspect the real
-  tracker day view and adjust them before relying on this for real data.
+- Reading existing entries relies on the `tasks/grouped-by-projects` API
+  response rather than scraping the DOM, so the tag-truncation-in-the-list-view
+  problem doesn't apply to reads. DOM lookups are still used to find each
+  entry's row (matched by project + list order) purely as a click target for
+  edit/delete - the live page selectors for that (and for what `Edit task`
+  actually opens, and whether `Delete task` confirms) have not been fully
+  verified yet.
 - Deletion has no notion of "added by this bot" - any Quidlo entry for a
   synced day that has no calendar counterpart is deleted, including entries
   added manually straight in Quidlo.
