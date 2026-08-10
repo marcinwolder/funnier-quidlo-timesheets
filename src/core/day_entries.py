@@ -31,32 +31,19 @@ async def select_day_and_read_entries(page: Page, date_iso: str) -> list[Existin
         await select_entry_date(page, date_iso)
     response = await response_info.value
     payload = await response.json()
-    return await _entries_from_payload(page, date_iso, payload)
+    return _entries_from_payload(date_iso, payload)
 
 
-async def _entries_from_payload(
-    page: Page,
+def _entries_from_payload(
     date_iso: str,
     payload: dict[str, object],
 ) -> list[ExistingEntry]:
-    # DOM rows are still needed as click targets for edit_entry/delete_entry
-    # (no confirmed write API yet), matched to the API's tasks by project
-    # name and list order - the DOM is rendered from this same response, so
-    # row order should match the API's task order within each project.
     existing: list[ExistingEntry] = []
-    project_sections = page.locator("[class*='List_list__']")
     projects = cast("list[dict[str, object]]", payload.get("projects", []))
     for project in projects:
         project_name = str(project.get("name", ""))
-        section = project_sections.filter(
-            has=page.locator(
-                "[class*='List_left__']",
-                has_text=re.compile(rf"^{re.escape(project_name)}$"),
-            ),
-        ).first
-        rows = section.locator("[class*='ListRow_listRow__']")
         tasks = cast("list[dict[str, object]]", project.get("tasks", []))
-        for index, task in enumerate(tasks):
+        for task in tasks:
             tag_dicts = cast("list[dict[str, object]]", task.get("tags", []))
             tags = tuple(str(tag.get("name", "")) for tag in tag_dicts)
             existing.append(
@@ -70,27 +57,43 @@ async def _entries_from_payload(
                         project=project_name,
                         tags=tags,
                     ),
-                    ref=rows.nth(index),
                 ),
             )
     return existing
 
 
+def _project_section(page: Page, project_name: str) -> Locator:
+    return page.locator("[class*='List_list__']").filter(
+        has=page.locator(
+            "[class*='List_left__']",
+            has_text=re.compile(rf"^{re.escape(project_name)}$"),
+        ),
+    ).first
+
+
+def _locate_row(page: Page, entry: EntryData) -> Locator:
+    # Re-resolved fresh (by project + description text) every time it's
+    # used, rather than a positional nth(index) captured once at read time:
+    # deleting/editing an earlier row in the same project section shifts
+    # every later row's index, so a stale positional reference would target
+    # the wrong task (or none) once anything ahead of it has been mutated.
+    section = _project_section(page, entry.project)
+    return section.locator("[class*='ListRow_listRow__']").filter(
+        has=page.locator(
+            "[class*='Text_text__']",
+            has_text=re.compile(rf"^{re.escape(entry.description)}$"),
+        ),
+    ).first
+
+
 # NOTE: the row-level "Delete task"/"Edit task" links are hidden until the
-# row is hovered, hence the explicit hover() before clicking. "Delete task"
-# still unverified: whether it deletes immediately or opens a confirmation
-# dialog, and if the latter, what that dialog's buttons actually look like -
-# Quidlo's own buttons are plain divs with no ARIA role (confirmed by the
-# Edit modal's Cancel/Save buttons below), so get_by_role("button", ...)
-# almost certainly never matches anything here and silently does nothing.
-# Watch a real delete before trusting this on real data.
+# row is hovered, hence the explicit hover() before clicking.
 async def delete_entry(page: Page, existing: ExistingEntry) -> None:
     # Confirmed against a captured "Delete task" confirmation modal: it's
     # the same Modal_card overlay as the Edit modal, with plain
-    # Button_button__ divs (no ARIA role) for "Cancel"/"Delete" - the
-    # previous get_by_role("button", ...) lookup could never match either
-    # one, so the confirmation was silently skipped.
-    row = cast("Locator", existing.ref)
+    # Button_button__ divs (no ARIA role) for "Cancel"/"Delete" - a
+    # get_by_role("button", ...) lookup could never match either one.
+    row = _locate_row(page, existing.entry)
     await row.hover()
     await row.locator("a[title='Delete task']").first.click()
 
@@ -111,7 +114,7 @@ async def edit_entry(page: Page, existing: ExistingEntry, target: EntryData) -> 
     # targets (none of its inputs have a name attribute at all), which is why
     # the previous version timed out - it kept clicking the create form's
     # (now covered-by-the-modal) inputs instead.
-    row = cast("Locator", existing.ref)
+    row = _locate_row(page, existing.entry)
     await row.hover()
     await row.locator("a[title='Edit task']").first.click()
 

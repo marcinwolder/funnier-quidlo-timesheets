@@ -16,14 +16,9 @@ _K = TypeVar("_K")
 
 @dataclass(frozen=True)
 class ExistingEntry:
-    """An entry already present on a Quidlo day.
-
-    `ref` is a handle the automation layer can act on later (a Playwright
-    row locator); this module never inspects it.
-    """
+    """An entry already present on a Quidlo day."""
 
     entry: EntryData
-    ref: object
 
 
 @dataclass(frozen=True)

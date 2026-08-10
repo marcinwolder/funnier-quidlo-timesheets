@@ -23,7 +23,7 @@ def make_entry(
 
 
 def make_existing(entry: EntryData) -> ExistingEntry:
-    return ExistingEntry(entry=entry, ref=object())
+    return ExistingEntry(entry=entry)
 
 
 def test_skips_when_calendar_entry_already_exists_unchanged() -> None:

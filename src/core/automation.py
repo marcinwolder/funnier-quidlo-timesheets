@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -22,7 +22,7 @@ from core.day_sync import compute_day_diff
 from core.entry_form import fill_and_submit_entry_form
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
     from playwright.async_api import Page
 
@@ -130,7 +130,7 @@ async def sync_entries(
     *,
     on_status: Callable[[str], None] | None = None,
     on_day_synced: Callable[[DaySyncResult], None] | None = None,
-    sweep_range: tuple[date, date] | None = None,
+    sweep_dates: Iterable[str] | None = None,
 ) -> list[DaySyncResult]:
     """Reconcile staged entries against Quidlo, one calendar day at a time.
 
@@ -139,10 +139,13 @@ async def sync_entries(
     and executed in that order - no reselecting the date between operations
     on the same day, and no confirmation step between days.
 
-    `sweep_range` (inclusive) forces every day in that span to be visited
+    `sweep_dates` (ISO date strings) forces each of those days to be visited
     even if it has no staged entries - otherwise a day whose only calendar
     entry was removed would never be checked, so a now-stale Quidlo entry
-    for that day would never be found and deleted.
+    for that day would never be found and deleted. Callers should pass the
+    exact set of dates that still need sweeping (not a min/max bounding
+    range), so unrelated days in between aren't swept too, and days already
+    handled by a previous partial run can be excluded from a retry.
     """
     sorted_entries = sort_entries_for_submission(entries)
     status = on_status or _default_on_status
@@ -170,7 +173,7 @@ async def sync_entries(
 
                 for date_iso, day_entries in build_day_groups(
                     sorted_entries,
-                    sweep_range,
+                    sweep_dates,
                 ):
                     existing = await select_day_and_read_entries(page, date_iso)
                     status(
@@ -194,20 +197,16 @@ async def sync_entries(
 
 def build_day_groups(
     entries: Sequence[EntryData],
-    sweep_range: tuple[date, date] | None = None,
+    sweep_dates: Iterable[str] | None = None,
 ) -> list[tuple[str, list[EntryData]]]:
-    """Group entries by day, plus every day in `sweep_range` with no entries."""
+    """Group entries by day, plus every day in `sweep_dates` with no entries."""
     entries_by_date: dict[str, list[EntryData]] = {}
     for entry in entries:
         entries_by_date.setdefault(entry.date_iso, []).append(entry)
 
     all_dates = set(entries_by_date)
-    if sweep_range is not None:
-        start, end = sweep_range
-        current = start
-        while current <= end:
-            all_dates.add(current.isoformat())
-            current += timedelta(days=1)
+    if sweep_dates is not None:
+        all_dates.update(sweep_dates)
 
     return [
         (date_iso, entries_by_date.get(date_iso, []))

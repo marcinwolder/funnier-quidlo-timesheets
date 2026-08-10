@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import date
-
 from core.automation import build_day_groups
 from core.models import EntryData
 
@@ -38,14 +36,14 @@ def test_single_entry_yields_single_group() -> None:
     assert build_day_groups([entry]) == [("2026-08-01", [entry])]
 
 
-def test_sweep_range_adds_empty_groups_for_days_with_no_entries() -> None:
+def test_sweep_dates_add_empty_groups_for_days_with_no_entries() -> None:
     # A day whose only calendar entry was removed must still be visited
     # (as an empty group) so a stale Quidlo entry there can be deleted.
     entry = make_entry("2026-08-02", "a")
 
     groups = build_day_groups(
         [entry],
-        sweep_range=(date(2026, 8, 1), date(2026, 8, 3)),
+        sweep_dates=["2026-08-01", "2026-08-02", "2026-08-03"],
     )
 
     assert groups == [
@@ -55,22 +53,19 @@ def test_sweep_range_adds_empty_groups_for_days_with_no_entries() -> None:
     ]
 
 
-def test_sweep_range_covers_a_day_with_no_entries_at_all() -> None:
-    groups = build_day_groups(
-        [],
-        sweep_range=(date(2026, 8, 1), date(2026, 8, 1)),
-    )
+def test_sweep_dates_cover_a_day_with_no_entries_at_all() -> None:
+    groups = build_day_groups([], sweep_dates=["2026-08-01"])
 
     assert groups == [("2026-08-01", [])]
 
 
-def test_entries_outside_sweep_range_are_still_included() -> None:
+def test_entries_outside_sweep_dates_are_still_included() -> None:
     inside = make_entry("2026-08-02", "a")
     outside = make_entry("2026-08-10", "b")
 
     groups = build_day_groups(
         [inside, outside],
-        sweep_range=(date(2026, 8, 1), date(2026, 8, 3)),
+        sweep_dates=["2026-08-01", "2026-08-02", "2026-08-03"],
     )
 
     assert groups == [
@@ -79,3 +74,12 @@ def test_entries_outside_sweep_range_are_still_included() -> None:
         ("2026-08-03", []),
         ("2026-08-10", [outside]),
     ]
+
+
+def test_sweep_dates_does_not_fill_the_gap_between_disjoint_dates() -> None:
+    # Two disjoint imports (e.g. Jan 1 and Jan 31) must not turn into one
+    # continuous swept range - every day strictly between them that was
+    # never imported must be left alone.
+    groups = build_day_groups([], sweep_dates=["2026-08-01", "2026-08-10"])
+
+    assert groups == [("2026-08-01", []), ("2026-08-10", [])]

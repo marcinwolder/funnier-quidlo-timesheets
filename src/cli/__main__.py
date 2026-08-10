@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
@@ -188,10 +188,14 @@ class TimeTrackerApp(App[None]):
         self.remote_calendars: list[RemoteCalendar] = []
         self.selected_index: int | None = None
         self._submission_worker: Worker[None] | None = None
-        # Union of all imported date ranges since the last sync/clear - lets
+        # Every date covered by an import since the last sync/clear, minus
+        # any already handled by a previous partial sync attempt - lets
         # sync_entries visit a day even if its only calendar entry was
         # removed, so a now-stale Quidlo entry there still gets deleted.
-        self.staged_date_range: tuple[date, date] | None = None
+        # Stored as explicit dates (not a min/max range) so disjoint imports
+        # don't get their gap swept too, and a retry can drop exactly the
+        # dates a prior attempt already finished.
+        self.pending_sweep_dates: set[date] = set()
 
     @staticmethod
     def local_today() -> date:
@@ -455,7 +459,7 @@ class TimeTrackerApp(App[None]):
 
         removed_count = len(self.entries)
         self.entries.clear()
-        self.staged_date_range = None
+        self.pending_sweep_dates.clear()
         self.selected_index = None
         self.refresh_entry_list()
         self.set_status(f"Deleted all staged entries ({removed_count}).")
@@ -464,7 +468,7 @@ class TimeTrackerApp(App[None]):
         if self._submission_worker is not None:
             self.set_status("A submission is already in progress.")
             return
-        if not self.entries:
+        if not self.entries and not self.pending_sweep_dates:
             self.set_status("Nothing to submit. Add at least one staged entry.")
             return
 
@@ -499,6 +503,9 @@ class TimeTrackerApp(App[None]):
             self.entries = [
                 entry for entry in self.entries if entry.date_iso not in processed_dates
             ]
+            self.pending_sweep_dates -= {
+                date.fromisoformat(date_iso) for date_iso in processed_dates
+            }
             self.selected_index = None
             self.refresh_entry_list()
 
@@ -507,7 +514,7 @@ class TimeTrackerApp(App[None]):
                 self.entries,
                 on_status=self.set_status,
                 on_day_synced=handle_day_synced,
-                sweep_range=self.staged_date_range,
+                sweep_dates=[d.isoformat() for d in self.pending_sweep_dates],
             )
         except asyncio.CancelledError:
             remove_processed_days()
@@ -532,7 +539,7 @@ class TimeTrackerApp(App[None]):
             self.set_submitting_state(submitting=False)
 
         self.entries.clear()
-        self.staged_date_range = None
+        self.pending_sweep_dates.clear()
         self.selected_index = None
         self.refresh_entry_list()
         self.set_status(f"Synced {submitted_total} staged entries.")
@@ -761,11 +768,10 @@ class TimeTrackerApp(App[None]):
     def extend_staged_date_range(self, start: date | None, end: date | None) -> None:
         if start is None or end is None:
             return
-        if self.staged_date_range is None:
-            self.staged_date_range = (start, end)
-            return
-        current_start, current_end = self.staged_date_range
-        self.staged_date_range = (min(current_start, start), max(current_end, end))
+        current = start
+        while current <= end:
+            self.pending_sweep_dates.add(current)
+            current += timedelta(days=1)
 
     def stage_imported_entries(
         self,

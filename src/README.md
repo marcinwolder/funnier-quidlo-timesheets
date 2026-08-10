@@ -48,20 +48,27 @@ The automation currently:
   - runs delete -> update -> insert for the day, then moves to the next day,
     with no confirmation step in between
   - the day-groups swept (`core/automation.py`'s `build_day_groups`) cover
-    the full union of every imported date range (tracked by the TUI as
-    `staged_date_range`, extended on each `.ics`/remote import and reset
-    after a full sync or "Delete All"), not just days that ended up with a
-    staged entry - otherwise a day whose only calendar entry got removed
-    would never be visited, so a now-stale Quidlo entry there would never
-    be detected and deleted
+    every date from every imported range (tracked by the TUI as an explicit
+    `pending_sweep_dates` set, not a min/max bounding interval - so two
+    disjoint imports, e.g. Jan 1 and Jan 31, don't turn into one continuous
+    range that sweeps every untouched day in between), not just days that
+    ended up with a staged entry - otherwise a day whose only calendar
+    entry got removed would never be visited, so a now-stale Quidlo entry
+    there would never be detected and deleted. Dates are dropped from
+    `pending_sweep_dates` as soon as their day finishes syncing, and the
+    whole set is cleared after a full sync or "Delete All", so a retry
+    after a partial failure never re-sweeps (and deletes) a day that was
+    already correctly synced moments earlier
 
 ## Notes
 
 - Reading existing entries relies on the `tasks/grouped-by-projects` API
   response rather than scraping the DOM, so the tag-truncation-in-the-list-view
   problem doesn't apply to reads. DOM lookups are still used to find each
-  entry's row (matched by project + list order) purely as a click target for
-  edit/delete.
+  entry's row (matched fresh, by project + description text, right before
+  each click - not a positional index captured at read time, which would
+  drift once an earlier row in the same project section gets deleted or
+  edited) purely as a click target for edit/delete.
 - `Edit task` opens a separate modal, not the create-entry form - confirmed
   against a captured modal and implemented against its real fields.
   Description, duration, and tags are updated there: clicking the tags
