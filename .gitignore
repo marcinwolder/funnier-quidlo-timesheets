@@ -1,3 +1,4 @@
 .pycache
 .uv-cache
 .DS_Store
+.claude/worktrees/

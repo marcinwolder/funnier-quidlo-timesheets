@@ -12,56 +12,55 @@ if TYPE_CHECKING:
 
 
 async def read_day_entries(page: Page, date_iso: str) -> list[ExistingEntry]:
-    # NOTE: the row/field selectors below follow this file's existing Quidlo
-    # class-name conventions but are best-effort guesses, not verified
-    # against the live DOM (see README "Known limitations") - inspect the
-    # real tracker day view and adjust before relying on them for real
-    # edit/delete decisions.
-    rows = page.locator("[class*='DayEntry_row'], [class*='TimeEntry_row']")
-    count = await rows.count()
+    # Confirmed against the live Quidlo DOM: entries are grouped into one
+    # section per project (List_list__...), whose header (List_left__...)
+    # holds the project name; individual entries (ListRow_listRow__...) only
+    # carry description/tags/duration, not the project.
     existing: list[ExistingEntry] = []
-    for index in range(count):
-        row = rows.nth(index)
-        project = await _row_field_text(row, "[class*='TimeEntry_project']")
-        description = await _row_field_text(row, "[class*='TimeEntry_title']")
-        duration = await _row_field_text(row, "[class*='TimeEntry_duration']")
-        tags = tuple(
-            tag.strip()
-            for tag in await row.locator("[class*='TimeEntry_tag']").all_inner_texts()
-            if tag.strip()
-        )
-        existing.append(
-            ExistingEntry(
-                entry=EntryData(
-                    date_iso=date_iso,
-                    duration=duration,
-                    description=description,
-                    project=project,
-                    tags=tags,
+    project_sections = page.locator("[class*='List_list__']")
+    section_count = await project_sections.count()
+    for section_index in range(section_count):
+        section = project_sections.nth(section_index)
+        project = await _locator_text(section, "[class*='List_left__']")
+        rows = section.locator("[class*='ListRow_listRow__']")
+        row_count = await rows.count()
+        for row_index in range(row_count):
+            row = rows.nth(row_index)
+            description = await _locator_text(row, "[class*='Text_text__']")
+            duration = await _locator_text(row, "[class*='ListCell_last__']")
+            tags = tuple(
+                tag.strip()
+                for tag in await row.locator("[class*='Tag_text__']").all_inner_texts()
+                if tag.strip()
+            )
+            existing.append(
+                ExistingEntry(
+                    entry=EntryData(
+                        date_iso=date_iso,
+                        duration=duration,
+                        description=description,
+                        project=project,
+                        tags=tags,
+                    ),
+                    ref=row,
                 ),
-                ref=row,
-            ),
-        )
+            )
     return existing
 
 
-async def _row_field_text(row: Locator, selector: str) -> str:
-    return (await row.locator(selector).first.inner_text()).strip()
+async def _locator_text(scope: Locator, selector: str) -> str:
+    return (await scope.locator(selector).first.inner_text()).strip()
 
 
-async def open_entry_row_menu(row: Locator) -> None:
-    await row.hover()
-    menu_button = row.locator(
-        "[class*='TimeEntry_menuButton'], [class*='TimeEntry_moreButton']",
-    ).first
-    await menu_button.click()
-
-
+# NOTE: the row-level "Delete task"/"Edit task" links below are confirmed
+# against the live DOM. What happens after clicking them is not: whether
+# "Edit task" opens the same create-entry form fields fill_and_submit_entry_form
+# targets, and whether "Delete task" deletes immediately or opens a
+# confirmation dialog. Watch a real run before trusting update/delete on
+# real data.
 async def delete_entry(page: Page, existing: ExistingEntry) -> None:
     row = cast("Locator", existing.ref)
-    await open_entry_row_menu(row)
-    delete_option = page.get_by_text(re.compile(r"^delete$", re.IGNORECASE)).first
-    await delete_option.click()
+    await row.locator("a[title='Delete task']").first.click()
     confirm_button = page.get_by_role(
         "button",
         name=re.compile(r"delete", re.IGNORECASE),
@@ -73,6 +72,6 @@ async def delete_entry(page: Page, existing: ExistingEntry) -> None:
 
 async def edit_entry(page: Page, existing: ExistingEntry, target: EntryData) -> None:
     row = cast("Locator", existing.ref)
-    await row.click()
+    await row.locator("a[title='Edit task']").first.click()
     await fill_and_submit_entry_form(page, target)
     await page.wait_for_timeout(1500)

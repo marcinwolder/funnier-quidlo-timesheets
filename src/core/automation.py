@@ -165,6 +165,10 @@ async def sync_entries(
                 for date_iso, day_entries in group_entries_by_date(sorted_entries):
                     await select_entry_date(page, date_iso)
                     existing = await read_day_entries(page, date_iso)
+                    status(
+                        f"Found {len(existing)} existing entr"
+                        f"{'y' if len(existing) == 1 else 'ies'} for {date_iso}.",
+                    )
                     plan = compute_day_diff(date_iso, day_entries, existing)
                     result = await _execute_day_plan(page, plan, status)
                     results.append(result)
