@@ -90,7 +90,12 @@ async def click_calendar_day(page: Page, target_date: date) -> None:
     )
     preferred_day = await find_preferred_calendar_day(day_cell)
     if preferred_day is not None:
-        await preferred_day.click()
+        # A real mouse click first hovers and waits for the element to be
+        # stable across frames, but this picker re-renders its range-preview
+        # highlight on hover, so the element never stabilizes and the click
+        # times out. Dispatching .click() directly in the page sidesteps the
+        # hover/stability wait entirely.
+        await preferred_day.evaluate("element => element.click()")
         return
 
     message = f"Could not find calendar day {day_text} in the visible month view."
