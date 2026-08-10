@@ -127,7 +127,11 @@ def compute_day_diff(
 def _needs_update(existing: EntryData, target: EntryData) -> bool:
     existing_minutes = parse_duration_minutes(existing.duration)
     target_minutes = parse_duration_minutes(target.duration)
-    return existing_minutes != target_minutes or existing.tags != target.tags
+    # Tag order carries no meaning (calendar hashtag order vs. Quidlo's own
+    # server-side tag order need not match), so compare as sets.
+    return existing_minutes != target_minutes or set(existing.tags) != set(
+        target.tags,
+    )
 
 
 def _group_by(items: Sequence[_T], key: Callable[[_T], _K]) -> dict[_K, list[_T]]:

@@ -62,6 +62,21 @@ def test_updates_when_only_tags_differ() -> None:
     assert not plan.skips
 
 
+def test_skips_when_tags_only_differ_in_order() -> None:
+    # Calendar tag order (hashtag order in the event description) has no
+    # reason to match Quidlo's own tag order - a reorder alone must not
+    # trigger an update.
+    cal_entry = make_entry(tags=("backend", "bench"))
+    existing = make_existing(make_entry(tags=("bench", "backend")))
+
+    plan = compute_day_diff(DATE_ISO, [cal_entry], [existing])
+
+    assert plan.skips == (cal_entry,)
+    assert not plan.updates
+    assert not plan.inserts
+    assert not plan.deletes
+
+
 def test_inserts_calendar_only_entry_with_no_duration_match() -> None:
     cal_entry = make_entry(project="A", description="X", duration="1h")
 
