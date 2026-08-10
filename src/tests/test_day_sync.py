@@ -50,13 +50,17 @@ def test_updates_when_only_duration_differs() -> None:
     assert not plan.skips
 
 
-def test_updates_when_only_tags_differ() -> None:
+def test_skips_when_only_tags_differ() -> None:
+    # Tags are excluded from the update trigger: Quidlo's list view
+    # collapses 2+ tags to "first tag + N", so tag differences can't be
+    # read reliably and are deliberately ignored here (see day_sync docstring).
     cal_entry = make_entry(tags=("billable",))
     existing = make_existing(make_entry(tags=()))
 
     plan = compute_day_diff(DATE_ISO, [cal_entry], [existing])
 
-    assert plan.updates == ((existing, cal_entry),)
+    assert plan.skips == (cal_entry,)
+    assert not plan.updates
     assert not plan.inserts
     assert not plan.deletes
 

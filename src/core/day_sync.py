@@ -45,8 +45,11 @@ def compute_day_diff(
     Two matching passes:
 
     1. By (project, description) - the identity of "the same task". A pair
-       that also matches on duration and tags needs no action (skip);
-       otherwise it's an update.
+       that also matches on duration needs no action (skip); otherwise it's
+       an update. Tags are intentionally excluded from this comparison: when
+       an entry has 2+ tags, Quidlo's list view collapses them to "first tag
+       + N" with no reliable way to read the rest, so comparing tags would
+       just produce false-positive updates for every multi-tag entry.
     2. Whatever's left (the event's title changed) is grouped by duration
        alone and paired within each duration bucket, since two events with
        the exact same length on one day are rare. Because an update
@@ -125,7 +128,7 @@ def compute_day_diff(
 def _needs_update(existing: EntryData, target: EntryData) -> bool:
     existing_minutes = parse_duration_minutes(existing.duration)
     target_minutes = parse_duration_minutes(target.duration)
-    return existing_minutes != target_minutes or existing.tags != target.tags
+    return existing_minutes != target_minutes
 
 
 def _group_by(items: Sequence[_T], key: Callable[[_T], _K]) -> dict[_K, list[_T]]:

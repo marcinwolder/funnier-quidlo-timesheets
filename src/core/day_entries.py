@@ -29,12 +29,13 @@ async def read_day_entries(page: Page, date_iso: str) -> list[ExistingEntry]:
             description = await _locator_text(row, "[class*='Text_text__']")
             duration = await _locator_text(row, "[class*='ListCell_last__']")
             # KNOWN LIMITATION: when a row has more than one tag, Quidlo's
-            # list view appears to truncate the display to the first tag
-            # plus a "+N" indicator rather than rendering a Tag_text chip per
-            # tag, so this can undercount tags for multi-tag entries. That
-            # only risks a spurious (harmless) update - _needs_update in
-            # day_sync.py always writes the calendar's own tags, never the
-            # possibly-undercounted ones read here.
+            # list view truncates the display to the first tag plus a
+            # "+N" counter (confirmed: the rest render as a Tooltip_wrapper
+            # Counter, not further Tag_text chips), so this can undercount
+            # tags for multi-tag entries. day_sync.py's _needs_update
+            # deliberately ignores tags for exactly this reason - it never
+            # drives an update/skip decision off this possibly-undercounted
+            # value.
             tags = tuple(
                 tag.strip()
                 for tag in await row.locator("[class*='Tag_text__']").all_inner_texts()
