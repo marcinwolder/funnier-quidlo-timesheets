@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
+from typing import TYPE_CHECKING
 
+import pytest
 from playwright.async_api import async_playwright
 
 from core.day_entries import delete_entry
 from core.day_sync import ExistingEntry, compute_day_diff
 from core.models import EntryData
+
+if TYPE_CHECKING:
+    from playwright.async_api import Browser, Playwright
 
 DATE_ISO = "2026-08-10"
 
@@ -74,6 +80,22 @@ FIXTURE_HTML = """
 """
 
 
+async def _launch_chromium_or_skip(playwright: Playwright) -> Browser:
+    # A fresh checkout with deps installed straight from pyproject.toml has
+    # the `playwright` package but no downloaded browser binary - these tests
+    # need `playwright install chromium` first, so skip instead of failing
+    # the whole suite when it's missing.
+    executable_exists = await asyncio.to_thread(
+        Path(playwright.chromium.executable_path).exists,
+    )
+    if not executable_exists:
+        pytest.skip(
+            "Chromium browser not installed for Playwright - run "
+            "`playwright install chromium` to run this test.",
+        )
+    return await playwright.chromium.launch()
+
+
 def _entry(
     project: str,
     description: str,
@@ -107,7 +129,7 @@ def test_absence_entry_survives_a_real_delete_sweep() -> None:
 
     async def run() -> tuple[int, int]:
         async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch()
+            browser = await _launch_chromium_or_skip(playwright)
             try:
                 page = await browser.new_page()
                 await page.set_content(FIXTURE_HTML)
@@ -146,7 +168,7 @@ def test_delete_entry_can_in_fact_remove_an_absence_row_if_ever_asked() -> None:
 
     async def run() -> int:
         async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch()
+            browser = await _launch_chromium_or_skip(playwright)
             try:
                 page = await browser.new_page()
                 await page.set_content(FIXTURE_HTML)

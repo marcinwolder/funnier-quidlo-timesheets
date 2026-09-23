@@ -87,8 +87,21 @@ The automation currently:
 - `Delete task` opens a confirmation modal (same Modal_card structure as
   the Edit modal, plain divs with no ARIA role for "Cancel"/"Delete") -
   confirmed live and implemented against its real fields.
-- Deletion has no notion of "added by this bot" - any Quidlo entry for a
-  synced day that has no calendar counterpart is deleted, including entries
-  added manually straight in Quidlo.
+- Deletion excludes entries in the `Miquido - Absence` project (matched by
+  project name, case-insensitively) - those are added by an external bot,
+  never by this tool, and are excluded from both sides of the diff up front
+  so they're never inserted, updated, or deleted regardless of what's in the
+  calendar. Any other Quidlo entry for a synced day with no calendar
+  counterpart is still deleted, including entries added manually straight in
+  Quidlo.
 - Sync stops on the first error, but days that already fully synced are not
   retried when resuming.
+
+## Tests
+
+`pytest` runs the suite. Most tests are plain unit tests with no browser
+dependency. `tests/test_absence_entry_e2e.py` drives a real Chromium page
+against a fixture DOM to verify deletion behavior end-to-end; it needs a
+downloaded browser binary, which `pip install`ing this package does not
+provide, so run `playwright install chromium` once beforehand - those tests
+skip themselves with a clear message if it's missing.
