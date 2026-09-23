@@ -13,6 +13,15 @@ if TYPE_CHECKING:
 _T = TypeVar("_T")
 _K = TypeVar("_K")
 
+# Projects whose entries are created and maintained by an external system
+# (e.g. an absence bot), never by this tool - they must be left untouched
+# regardless of whether the calendar has a matching event.
+_EXTERNALLY_MANAGED_PROJECTS = frozenset({"miquido - absence"})
+
+
+def _is_externally_managed(entry: EntryData) -> bool:
+    return entry.project.strip().casefold() in _EXTERNALLY_MANAGED_PROJECTS
+
 
 @dataclass(frozen=True)
 class ExistingEntry:
@@ -56,8 +65,15 @@ def compute_day_diff(
        case is edited while the different-project case is replaced wholesale.
 
     Anything still unmatched is a plain insert (calendar-only) or delete
-    (Quidlo-only, regardless of who created it originally).
+    (Quidlo-only, regardless of who created it originally) - except entries
+    in an externally-managed project (see `_is_externally_managed`), which
+    are excluded up front so they're never inserted, updated, or deleted.
     """
+    calendar_entries = [e for e in calendar_entries if not _is_externally_managed(e)]
+    existing_entries = [
+        e for e in existing_entries if not _is_externally_managed(e.entry)
+    ]
+
     calendar_by_identity = _group_by(
         calendar_entries,
         lambda e: (e.project, e.description),

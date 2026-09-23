@@ -180,6 +180,45 @@ def test_duration_bucket_excess_existing_entry_becomes_delete() -> None:
     assert plan.deletes == (existing2,)
 
 
+def test_externally_managed_absence_entry_is_never_deleted() -> None:
+    # "Miquido - Absence" entries (e.g. bot-added vacation days) never show up
+    # in the calendar, so without an exclusion they'd look like a stale
+    # Quidlo-only entry and get deleted.
+    existing = make_existing(
+        make_entry(
+            project="Miquido - Absence", description="Vacation", tags=("vacation",),
+        ),
+    )
+
+    plan = compute_day_diff(DATE_ISO, [], [existing])
+
+    assert not plan.deletes
+    assert not plan.inserts
+    assert not plan.updates
+    assert not plan.skips
+
+
+def test_externally_managed_absence_entry_is_never_inserted_or_matched() -> None:
+    # If a calendar event happens to carry the same bot-managed project, it
+    # must not be inserted as a duplicate nor matched against the existing
+    # bot entry.
+    cal_entry = make_entry(
+        project="Miquido - Absence", description="Vacation", tags=("vacation",),
+    )
+    existing = make_existing(
+        make_entry(
+            project="Miquido - Absence", description="Vacation", tags=("vacation",),
+        ),
+    )
+
+    plan = compute_day_diff(DATE_ISO, [cal_entry], [existing])
+
+    assert not plan.inserts
+    assert not plan.deletes
+    assert not plan.updates
+    assert not plan.skips
+
+
 def test_multiple_entries_sharing_identity_key_are_paired_in_order() -> None:
     cal1 = make_entry(
         project="A",
