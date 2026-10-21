@@ -52,6 +52,14 @@ Przy pierwszym uruchomieniu i próbie wysyłki otworzy się okno przeglądarki �
 | `Escape`   | Wyczyść formularz             |
 | `Q`        | Wyjście                       |
 
+## Skill Claude Code: `/sync-timesheets`
+
+Alternatywa dla TUI bez przeglądarki: skill w `.claude/skills/sync-timesheets/` czyta kalendarz Google i Timesheets przez serwery MCP (claude.ai Google Calendar i timesheets), liczy plan tymi samymi regułami co TUI (`scripts/sync_plan.py`, sam stdlib), pokazuje podgląd i wykonuje dodania/edycje/usunięcia. Sumy porównuje z arkuszem godzin (kolumny „Quildo” i „Suma częściowa godzin Quildo”): gdy kalendarz się z nim zgadza, działa bez pytań, w przeciwnym razie prosi o jedną zgodę.
+
+- `/sync-timesheets` – bieżący tydzień (pon–dziś), kalendarz `Projects`.
+- `/sync-timesheets 2026-10-01..2026-10-15 +odrabianie` – zakres plus kalendarz `Projects - Odrabianie (+)` (tylko na wyraźną prośbę).
+- Wpisy zatwierdzone i projekt „Miquido - Absence” nie są ruszane; całość cofa `rollback_changes` w MCP timesheets.
+
 ## Gdzie umieszczać pliki kalendarza
 
 Pliki `.ics` wrzucaj do katalogu `calendars/` w głównym folderze repozytorium. Będą wtedy podpowiadane w polu „ICS file” w zakładce **From .ics**. Katalog ma wpis `.gitignore` na `*.ics`, więc kalendarze nie trafiają do repozytorium.
